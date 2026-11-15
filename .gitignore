@@ -1,0 +1,13 @@
+node_modules
+dist
+cdk.out
+.astro
+coverage
+.env*
+!.env.example
+*.tsbuildinfo
+.DS_Store
+*.log
+# Herramientas locales de agentes: contienen rutas de tu máquina
+.atl/
+.claude/settings.local.json
