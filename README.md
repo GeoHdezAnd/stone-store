@@ -4,7 +4,7 @@ Sitio y tienda de cotizaciones de una cantera familiar de Puebla, México. Es un
 
 ## Estructura
 
-- `apps/`: frontends (sitio público y dashboard del dueño). **Todavía no existe**: llega con la fase 2 (admin) y la fase 3 (sitio público).
+- `apps/`: frontends (sitio público y dashboard del dueño). **Todavía no existe**: llega con la fase 2 (admin) y la fase 4 (sitio público).
 - `packages/`: código compartido (dominio, UI). Son paquetes internos: se consumen directo desde `src/index.ts`, sin compilar ni generar `dist`.
 - `services/`: Lambdas y API (TypeScript).
 - `infra/`: infraestructura como código con AWS CDK.

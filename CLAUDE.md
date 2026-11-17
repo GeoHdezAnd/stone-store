@@ -13,7 +13,7 @@ Sitio web de **Canteras Naturales**, una cantera familiar de San Salvador el Sec
 
 Idioma del sitio y de los textos: **español de México**. Moneda: **MXN**.
 
-**Proyecto académico:** el negocio es **ficticio** y el objetivo es aprender AWS y tener un proyecto de portafolio. Todos los datos (clientes, precios, pesos, tarifas, métricas) son de ejemplo. No hay clientes reales: aun así, trata los datos personales como si lo fueran (buenas prácticas de seguridad y privacidad). Prioriza terminar un MVP (fases 1 a 3) antes de ampliar.
+**Proyecto académico:** el negocio es **ficticio** y el objetivo es aprender AWS y tener un proyecto de portafolio. Todos los datos (clientes, precios, pesos, tarifas, métricas) son de ejemplo. No hay clientes reales: aun así, trata los datos personales como si lo fueran (buenas prácticas de seguridad y privacidad). Prioriza terminar un MVP (fases 1 a 4) antes de ampliar.
 
 ## 2. Objetivos de la v1
 
@@ -54,7 +54,7 @@ Reglas al convertirlo a código de producción:
 
 | Capa | Elección | Nota |
 |---|---|---|
-| Frontend público | **Astro** (HTML estático, islas de JS donde haga falta) — decidido | Fase 3: lee `content/` en build. Desde la fase 5: loader de build que lee `catalog.json` publicado en S3 (ver 6.1), con `content/` como respaldo. Un cambio publicado dispara un rebuild. |
+| Frontend público | **Astro** (HTML estático, islas de JS donde haga falta) — decidido | Desde la fase 4: loader de build que lee `catalog.json` publicado en S3 desde el dashboard (ver 6.1), con `content/` como respaldo. Un cambio publicado dispara un rebuild. |
 | Dashboard del dueño | **SPA en Vite + React + TypeScript** (app separada en `apps/admin`) | Servida desde su propio origen/ruta (`admin.<dominio>`), `noindex`, tablas con TanStack Table, gráficas con Recharts o similar. |
 | Autenticación | **Amazon Cognito** (User Pool + grupos `owner`, `staff`) | Login con correo y contraseña + MFA (TOTP) obligatorio para `owner`. API protegida con JWT authorizer de API Gateway. |
 | Lenguaje | **TypeScript** en todo — decidido (Java descartado para el MVP) | Frontend, Lambdas e infra. Ejecutar TS con `tsx` (no `ts-node`, que falla con TypeScript 7). |
@@ -202,7 +202,7 @@ Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 d
 
 **Métricas**: calcularlas con consultas sobre `Quotes` (GSI por estado/fecha) y, si crece, una Lambda diaria que guarde agregados en `Metrics` (`fecha`, `nuevas`, `cotizadas`, `ganadas`, `valorCotizado`, `valorGanado`, `porPiedra`, `porZona`, `tiempoRespuestaHoras`).
 
-**`Stones`, `Projects`** (fase 4, si se mueve el catálogo a DB): mismos campos que 6.1.
+**`Stones`, `Projects`** (fase 2, el catálogo vive en DB desde el inicio): mismos campos que 6.1.
 
 ### 6.3 Archivos en S3
 - Bucket `site-<env>`: sitio estático.
@@ -286,7 +286,7 @@ Requisitos transversales: CORS solo al dominio del sitio; límites de tamaño de
 canteras-naturales/
 ├─ CLAUDE.md                  # este archivo
 ├─ package.json               # npm workspaces: apps/*, packages/*, services/*, infra
-├─ tsconfig.base.json         # TS estricto + project references
+├─ tsconfig.base.json         # TS estricto, sin emit (tsc solo verifica tipos)
 ├─ .nvmrc                     # Node 22 o superior (fijado)
 ├─ apps/web/                  # sitio público (Astro, estático)
 │  ├─ src/pages, components, islands/
@@ -318,13 +318,13 @@ canteras-naturales/
 - **Paquetes internos:** `packages/*` se consumen directo desde el código fuente (`exports` → `src/index.ts`), sin paso de compilación previo. `tsc` solo verifica tipos (sin emitir); el empaquetado lo hacen Vite/Astro en los frontends y esbuild (`NodejsFunction`) en las Lambdas. `packages/*` no importa ningún paquete `@canteras/*` ni usa tipos de Node.
 - **Salvaguarda de entorno:** `infra/lib/config.ts` impide mezclar Floci con AWS real (con `AWS_ENDPOINT_URL` solo vale la cuenta `000000000000`, y esa cuenta nunca se usa sin el endpoint); `APP_ENV` solo acepta `dev` o `prod`, y `prod` exige cuenta explícita.
 - **Un stack por área, apilados por dependencia** (Data → Auth → Api → Site). Los stacks pueden recibir un flag de contexto para apagar piezas no soportadas por el emulador (p. ej. dominio/ACM).
-- **Despliegue del sitio:** `aws s3 sync` + invalidación desde CI (assets con hash `immutable`, HTML `no-cache`). No usar `BucketDeployment`: el contenido y la infra tienen ciclos de vida distintos (la fase 5 publica `catalog.json` fuera de CDK).
+- **Despliegue del sitio:** `aws s3 sync` + invalidación desde CI (assets con hash `immutable`, HTML `no-cache`). No usar `BucketDeployment`: el contenido y la infra tienen ciclos de vida distintos (la fase 3 publica `catalog.json` fuera de CDK).
 - **Entornos:** `dev` y `prod` (cuentas o al menos stacks separados por prefijo).
 - **Permisos IAM** de **mínimo privilegio** por Lambda (solo las tablas/acciones que usa), vía `grant*` de CDK. El rol de CI solo asume los roles de bootstrap de CDK (`cdk-*`) y tiene `s3 sync` + `cloudfront:CreateInvalidation`; ajustar la política de ejecución del bootstrap (`--cloudformation-execution-policies`) en lugar de dejar `AdministratorAccess`.
 - **Etiquetar todo** con `Project=canteras-naturales`, `Env=<dev|prod>`.
 
 ### 9.2 Desarrollo local con Floci
-- Emulador AWS local para las fases 1 a 3; la consola real solo para un smoke test por fase y para lo que Floci no cubre (DNS/ACM real, SES fuera de sandbox, caché y cabeceras reales de CloudFront, aplicación real de IAM, Location Service, Budgets).
+- Emulador AWS local para las fases 1 a 4; la consola real solo para un smoke test por fase y para lo que Floci no cubre (DNS/ACM real, SES fuera de sandbox, caché y cabeceras reales de CloudFront, aplicación real de IAM, Location Service, Budgets).
 - Levantar: `docker run -d --name floci -p 4566:4566 -v /var/run/docker.sock:/var/run/docker.sock -u root floci/floci:latest` y salud en `curl localhost:4566/_floci/health`. El socket de Docker es obligatorio (Lambda corre en contenedores).
 - Variables solo para Floci: `AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 AWS_ENDPOINT_URL=http://localhost:4566`; bootstrap con `npx cdk bootstrap aws://000000000000/us-east-1`. CDK respeta `AWS_ENDPOINT_URL`, no hace falta `cdklocal`.
 - Límites conocidos: no ejecuta CloudFront Functions, no soporta `ResponseHeadersPolicy` custom vía CloudFormation, y el JWT authorizer rechaza issuers privados salvo `FLOCI_SECURITY_ALLOW_PRIVATE_JWT_TARGETS=true`. Probar la lógica de esas piezas con tests unitarios y verificarlas en AWS real. Verificar en el smoke test: OAC, `defaultRootObject`, validación DNS de ACM y alias de Route 53.
@@ -342,13 +342,13 @@ canteras-naturales/
 
 ## 11. Fases de trabajo (hacer en este orden, cada una desplegable)
 
-> **Orden revisado:** el dueño prioriza el dashboard sobre el sitio público. El dashboard no depende del sitio (solo de datos, autenticación, API y hosting), así que va justo después de los fundamentos y el sitio público pasa a la fase 3. El contenido de ejemplo no se discute: la prioridad es una base sólida conectable a AWS.
+> **Orden revisado:** el dueño prioriza el dashboard completo (catálogo y todo el manejo del negocio) sobre el sitio público: primero debe existir algo real sobre lo que trabajar. El dashboard no depende del sitio (solo de datos, autenticación, API y hosting), y el sitio público después consume lo que el dueño publique. El contenido de ejemplo no se discute: la prioridad es una base sólida conectable a AWS.
 
 1. **Fundamentos e infraestructura de hosting**: **T0** repo y tooling (hecho), **T1** construct reutilizable de sitio estático y `SiteStack` en CDK probado en Floci (S3 privado + CloudFront con OAC, sin dominio propio) que publica una página provisional "En construcción", **T2** CI/CD con GitHub Actions y OIDC con aprobación manual, **T3** smoke test en AWS real mostrando antes el `cdk diff`. El mismo construct se reutiliza después en `AdminSiteStack`. *Aprender: S3, CloudFront, IAM, CDK, OIDC.*
-2. **Autenticación y dashboard: solicitudes** (prioridad del dueño): `DataStack` (`Quotes`, `Counters`, `AuditLog`, `FreightConfig` de ejemplo), Cognito (grupos + MFA), JWT authorizer, API de administración, `apps/admin` con los tokens de diseño en `packages/ui`, login, lista y detalle de solicitudes, cambio de estado, notas, precios, flete final, "Enviar cotización" por SES y auditoría. Mientras no exista el formulario público, las solicitudes se siembran con un script. *Aprender: Cognito, authorizers, DynamoDB, IAM por rol, SES.*
-3. **Sitio público y formulario**: sitio Astro (inicio, catálogo, ficha de piedra con layout Ficha, placeholders "En construcción") leyendo `content/`, lista de cotización en `localStorage`, API Gateway + Lambda `quotes-create` + SES, folio, validación, anti-spam y aviso de privacidad. Texto y botones con el acento oscuro `#ae1800`. *Aprender: Astro, Lambda, API Gateway.*
-4. **Flete automático**: `FreightConfig`, `PostalCodes`, `freight-estimate`, Location Service, caché de rutas, UI del estimado en el formulario, estimado guardado en la solicitud. *Aprender: Location Service, diseño de reglas de negocio, pruebas.*
-5. **Dashboard: catálogo, tarifas y publicar**: CRUD de piedras/proyectos con subida de fotos a S3 (URLs prefirmadas), editor de tarifas con versionado y simulador, `catalog.json` + botón Publicar/Revertir. Pasar el sitio público a leer `catalog.json`. *Aprender: S3 presigned URLs, invalidaciones de CloudFront, versionado de S3.*
+2. **Autenticación y dashboard: catálogo y configuración** (prioridad del dueño): `DataStack` (`Stones`, `Projects`, `Finishes`, `Services`, `Settings`, `AuditLog`, `Publications`, `Counters`), script que carga el seed de `content/` a DynamoDB, Cognito (grupos + MFA), JWT authorizer, API de administración, `apps/admin` con los tokens de diseño en `packages/ui`, login, CRUD de piedras, proyectos, acabados y servicios con subida de fotos a S3 (URLs prefirmadas), configuración (patio, WhatsApp, plantillas) y auditoría de cada escritura. *Aprender: Cognito, authorizers, DynamoDB, IAM por rol, S3 presigned URLs.*
+3. **Dashboard: publicar, tarifas y solicitudes**: `catalog.json` + botón Publicar/Revertir (versionado en S3, invalidación de CloudFront), editor de tarifas con versionado y simulador (`FreightConfig` de ejemplo), `Quotes` y `FreightConfig` en `DataStack`, lista y detalle de solicitudes, cambio de estado, notas, precios, flete final y "Enviar cotización" por SES. Mientras no exista el formulario público, las solicitudes se siembran con un script. *Aprender: versionado de S3, invalidaciones de CloudFront, SES.*
+4. **Sitio público y formulario**: sitio Astro (inicio, catálogo, ficha de piedra con layout Ficha, placeholders "En construcción") que lee el `catalog.json` publicado desde el dashboard, lista de cotización en `localStorage`, API Gateway + Lambda `quotes-create` + SES, folio, validación, anti-spam y aviso de privacidad. Texto y botones con el acento oscuro `#ae1800`. *Aprender: Astro, Lambda, API Gateway.*
+5. **Flete automático**: `PostalCodes`, `freight-estimate`, Location Service, caché de rutas, UI del estimado en el formulario, estimado guardado en la solicitud. *Aprender: Location Service, diseño de reglas de negocio, pruebas.*
 6. **Dashboard: métricas y operación**: resumen con gráficas, exportar CSV, alarmas, Budgets, optimización de imágenes (Lambda al subir a S3).
 7. **Después**: pago en línea (Mercado Pago o Stripe) con Lambda + webhooks, pedidos y facturación.
 
