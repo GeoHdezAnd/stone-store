@@ -58,7 +58,7 @@ Reglas al convertirlo a código de producción:
 | Dashboard del dueño | **SPA en Vite + React + TypeScript** (app separada en `apps/admin`) | Servida desde su propio origen/ruta (`admin.<dominio>`), `noindex`, tablas con TanStack Table, gráficas con Recharts o similar. |
 | Autenticación | **Amazon Cognito** (User Pool + grupos `owner`, `staff`) | Login con correo y contraseña + MFA (TOTP) obligatorio para `owner`. API protegida con JWT authorizer de API Gateway. |
 | Lenguaje | **TypeScript** en todo — decidido (Java descartado para el MVP) | Frontend, Lambdas e infra. Ejecutar TS con `tsx` (no `ts-node`, que falla con TypeScript 7). |
-| Backend | **AWS Lambda** (runtime `nodejs22.x` o superior; `nodejs20.x` está deprecado) + **API Gateway HTTP API** | Una Lambda por endpoint. Lógica de dominio pura en `packages/shared`; clientes AWS en `services/api/src/lib` (ver 9). |
+| Backend | **AWS Lambda** (runtime `nodejs22.x` o superior; `nodejs20.x` está deprecado) + **API Gateway HTTP API** | Una Lambda por **recurso** de la API de administración (con un router interno por método y ruta); los endpoints públicos sin autenticación (`freight-estimate`, `quotes-create`) conservan una Lambda propia. Lógica de dominio pura en `packages/shared`; clientes AWS en `services/api/src/lib` (ver 9). |
 | Base de datos | **DynamoDB** (on-demand) | Ver sección 6. |
 | Imágenes/estáticos | **S3 + CloudFront** | OAC (Origin Access Control), nunca bucket público directo. |
 | Dominio/HTTPS | **Route 53 + ACM** (certificado en us-east-1 para CloudFront) | Opcional y apagado por defecto (flag de contexto CDK): en la fase 1 se usa el dominio `*.cloudfront.net`. Se activa cuando haya dominio. |
@@ -194,7 +194,7 @@ Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 d
 
 **`Counters`**: `name` (PK), `value` (para el folio).
 
-**`AuditLog`**: `pk = "ENTITY#<tipo>#<id>"`, `sk = ISO timestamp`, `userId`, `accion`, `antes`, `despues`. Escrito por toda API de admin.
+**`AuditLog`**: `pk = "ENTITY#<tipo>#<id>"`, `sk = "<ISO timestamp>#<requestId>"` (único por petición y ordenable por tiempo; el `requestId` evita colisiones en el mismo milisegundo), `userId`, `accion`, `antes`, `despues`. Escrito por toda API de admin, en la misma transacción que la escritura que audita. Límite conocido del MVP: `antes` viene de una lectura previa a la transacción, así que bajo escrituras simultáneas sobre el mismo registro puede quedar desfasado.
 
 **`Settings`**: una fila `PUBLIC` (patio, horario, WhatsApp, textos) y una `MAIL` (plantillas de correo con variables).
 
@@ -257,7 +257,7 @@ Tests unitarios con casos: 1 m², 210 m² (varios viajes), tonelada, mezcla de p
 | `GET /quotes/{folio}` (opcional) | Consulta de estado con folio + correo. Fase posterior. |
 | `GET /health` | Comprobación simple. |
 
-**API de administración** (prefijo `/admin`, **todas** con JWT authorizer de Cognito; verificar grupo `owner`/`staff` en cada Lambda):
+**API de administración** (prefijo `/admin`, **todas** con JWT authorizer de Cognito; verificar grupo `owner`/`staff` en cada Lambda **y en cada ruta de su router interno**: el permiso se decide por ruta y método, no por Lambda):
 
 | Método y ruta | Descripción |
 |---|---|
@@ -303,7 +303,8 @@ canteras-naturales/
 │     ├─ lib/                 # clientes AWS (DynamoDB, S3, SES), auth/roles, auditoría, logger
 │     ├─ freight-estimate/
 │     ├─ quotes-create/
-│     └─ admin-*/             # quotes, catalog, media, freight-config, metrics, publish, users
+│     └─ admin-*/             # una Lambda por recurso, con router interno: quotes, catalog (stones, projects, finishes, services),
+│                             # media, freight-config, settings, metrics, publish, users
 ├─ infra/                     # AWS CDK (TypeScript)
 │  └─ stacks: SiteStack (S3, CloudFront, [Route53, ACM opcionales]), ApiStack (API GW, Lambdas, IAM),
 │              DataStack (DynamoDB), MailStack (SES), AuthStack (Cognito), AdminSiteStack (S3+CloudFront del dashboard),
@@ -320,12 +321,12 @@ canteras-naturales/
 - **Un stack por área, apilados por dependencia** (Data → Auth → Api → Site). Los stacks pueden recibir un flag de contexto para apagar piezas no soportadas por el emulador (p. ej. dominio/ACM).
 - **Despliegue del sitio:** `aws s3 sync` + invalidación desde CI (assets con hash `immutable`, HTML `no-cache`). No usar `BucketDeployment`: el contenido y la infra tienen ciclos de vida distintos (la fase 3 publica `catalog.json` fuera de CDK).
 - **Entornos:** `dev` y `prod` (cuentas o al menos stacks separados por prefijo).
-- **Permisos IAM** de **mínimo privilegio** por Lambda (solo las tablas/acciones que usa), vía `grant*` de CDK. El rol de CI solo asume los roles de bootstrap de CDK (`cdk-*`) y tiene `s3 sync` + `cloudfront:CreateInvalidation`; ajustar la política de ejecución del bootstrap (`--cloudformation-execution-policies`) en lugar de dejar `AdministratorAccess`.
+- **Permisos IAM** de **mínimo privilegio** por Lambda (solo las tablas/acciones que usa), vía `grant*` de CDK. Con una Lambda por recurso, el rol cubre únicamente las tablas de ese recurso y `AuditLog`; el aislamiento ya no es por endpoint, así que cada ruta del router debe verificar el rol y se prueba con tests. El rol de CI solo asume los roles de bootstrap de CDK (`cdk-*`) y tiene `s3 sync` + `cloudfront:CreateInvalidation`; ajustar la política de ejecución del bootstrap (`--cloudformation-execution-policies`) en lugar de dejar `AdministratorAccess`.
 - **Etiquetar todo** con `Project=canteras-naturales`, `Env=<dev|prod>`.
 
 ### 9.2 Desarrollo local con Floci
 - Emulador AWS local para las fases 1 a 4. AWS real solo en el **hito de salida** (después de la fase 4, ver sección 11), con un único smoke test de lo que Floci no cubre (DNS/ACM real, SES fuera de sandbox, caché y cabeceras reales de CloudFront, aplicación real de IAM, Location Service, Budgets).
-- Levantar: `docker compose up -d` desde la raíz (usa `docker-compose.yml`, con el socket de Docker y un volumen de datos) y salud en `curl localhost:4566/_floci/health`. El socket de Docker es obligatorio (Lambda corre en contenedores).
+- Levantar: `docker compose up -d` desde la raíz (usa `docker-compose.yml`, con el socket de Docker y un volumen de datos) y salud en `curl localhost:4566/_floci/health`. El socket de Docker es obligatorio (Lambda corre en contenedores). **El JWT authorizer solo funciona si Floci tiene una IP fija**: el compose crea una red con subred fija y `FLOCI_HOSTNAME` es una IP literal (`172.30.0.10`, constante `FLOCI_IP` en `infra/lib/config.ts`); con un nombre de host el authorizer responde 401 siempre.
 - Variables solo para Floci: `AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 AWS_ENDPOINT_URL=http://localhost:4566`; bootstrap con `npx cdk bootstrap aws://000000000000/us-east-1`. CDK respeta `AWS_ENDPOINT_URL`, no hace falta `cdklocal`.
 - Límites conocidos: no ejecuta CloudFront Functions, no soporta `ResponseHeadersPolicy` custom vía CloudFormation, el JWT authorizer rechaza issuers privados salvo `FLOCI_SECURITY_ALLOW_PRIVATE_JWT_TARGETS=true`, **no aplica bucket policy ni BlockPublicAccess** (un GET sin firma a S3 devuelve 200) y la Lambda de `autoDeleteObjects` falla con `ECONNREFUSED` al puerto 443 (también con Compose). Por eso `SiteStack` apaga `autoDeleteObjects` cuando hay `AWS_ENDPOINT_URL` (`DeployEnv.emulated`) y el bucket se vacía a mano antes de `cdk destroy`. Probar la lógica de esas piezas con tests unitarios y verificarlas en AWS real, en el hito de salida. Verificar en ese smoke test: rechazo de lectura directa al bucket, OAC, `defaultRootObject`, validación DNS de ACM y alias de Route 53.
 - Nunca usar credenciales reales con `AWS_ENDPOINT_URL` apuntando a Floci, ni al revés.

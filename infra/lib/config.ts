@@ -9,6 +9,12 @@ export interface DeployEnv {
 // Cuenta ficticia que usa el emulador Floci (CLAUDE.md 9.2).
 export const FLOCI_ACCOUNT = '000000000000';
 
+// IP fija y puerto de Floci: DEBEN coincidir con docker-compose.yml (ipv4_address,
+// FLOCI_HOSTNAME y el puerto publicado). El JWT authorizer de Floci solo acepta un issuer
+// HTTP con IP literal, por eso el issuer del emulador se arma con estas constantes.
+export const FLOCI_IP = '172.30.0.10';
+export const FLOCI_API_PORT = 4566;
+
 export function resolveEnv(env: NodeJS.ProcessEnv = process.env): DeployEnv {
   const rawName = env['APP_ENV'] ?? 'dev';
   if (rawName !== 'dev' && rawName !== 'prod') {

@@ -1,0 +1,69 @@
+{
+  "ejemplo": true,
+  "aviso": "Datos de ejemplo, no reales.",
+  "items": [
+    {
+      "id": "corte-de-sierra",
+      "nombre": "Corte de sierra",
+      "descripcion": "Superficie plana y uniforme que deja la sierra; textura fina y mate.",
+      "foto": null,
+      "activa": true
+    },
+    {
+      "id": "apomazado",
+      "nombre": "Apomazado",
+      "descripcion": "Pulido ligero y suave al tacto, sin brillo marcado.",
+      "foto": null,
+      "activa": true
+    },
+    {
+      "id": "cincelado",
+      "nombre": "Cincelado",
+      "descripcion": "Superficie trabajada a cincel con huellas visibles hechas a mano.",
+      "foto": null,
+      "activa": true
+    },
+    {
+      "id": "martelinado",
+      "nombre": "Martelinado",
+      "descripcion": "Golpeado con martillo de puntas para lograr una textura rugosa antiderrapante.",
+      "foto": null,
+      "activa": true
+    },
+    {
+      "id": "arenado",
+      "nombre": "Arenado",
+      "descripcion": "Chorro de arena que suaviza el color y deja un grano uniforme.",
+      "foto": null,
+      "activa": true
+    },
+    {
+      "id": "envejecido",
+      "nombre": "Envejecido",
+      "descripcion": "Bordes y caras desgastados para dar apariencia antigua.",
+      "foto": null,
+      "activa": true
+    },
+    {
+      "id": "labrado",
+      "nombre": "Labrado",
+      "descripcion": "Piezas talladas a mano con molduras y relieves.",
+      "foto": null,
+      "activa": true
+    },
+    {
+      "id": "cepillado",
+      "nombre": "Cepillado",
+      "descripcion": "Superficie cepillada con ligera textura y aspecto natural.",
+      "foto": null,
+      "activa": true
+    },
+    {
+      "id": "rustico",
+      "nombre": "Rústico",
+      "descripcion": "Cara natural de la roca, con la textura original de la veta.",
+      "foto": null,
+      "activa": true
+    }
+  ]
+}

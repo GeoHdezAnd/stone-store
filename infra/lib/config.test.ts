@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FLOCI_ACCOUNT, resolveEnv } from './config';
+import { FLOCI_ACCOUNT, FLOCI_API_PORT, FLOCI_IP, resolveEnv } from './config';
 
 const REAL = '123456789012';
 const FLOCI = { AWS_ENDPOINT_URL: 'http://localhost:4566' };
@@ -105,5 +107,19 @@ describe('resolveEnv', () => {
         resolveEnv({ APP_ENV: 'prod', CDK_DEFAULT_ACCOUNT: REAL, CDK_DEFAULT_REGION: 'us-east-2' }),
       ).toEqual({ name: 'prod', account: REAL, region: 'us-east-2', emulated: false });
     });
+  });
+});
+
+describe('constantes de Floci', () => {
+  it('la IP fija y el puerto coinciden con docker-compose.yml', () => {
+    expect(FLOCI_IP).toBe('172.30.0.10');
+    expect(FLOCI_API_PORT).toBe(4566);
+    const compose = readFileSync(
+      join(import.meta.dirname, '..', '..', 'docker-compose.yml'),
+      'utf8',
+    );
+    expect(compose).toContain(`ipv4_address: ${FLOCI_IP}`);
+    expect(compose).toContain(`FLOCI_HOSTNAME: ${FLOCI_IP}`);
+    expect(compose).toContain(`'${FLOCI_API_PORT}:${FLOCI_API_PORT}'`);
   });
 });

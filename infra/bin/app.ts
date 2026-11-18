@@ -1,6 +1,9 @@
 import { App, Tags } from 'aws-cdk-lib';
+import { ApiStack } from '../lib/api-stack.js';
+import { AuthStack } from '../lib/auth-stack.js';
 import { CiStack } from '../lib/ci-stack.js';
 import { resolveEnv } from '../lib/config.js';
+import { DataStack } from '../lib/data-stack.js';
 import { SiteStack } from '../lib/site-stack.js';
 
 const deploy = resolveEnv();
@@ -13,6 +16,30 @@ const env = deploy.account
   : { region: deploy.region };
 
 new SiteStack(app, `canteras-site-${deploy.name}`, { env, deploy });
+const data = new DataStack(app, `canteras-data-${deploy.name}`, { env, deploy });
+
+const auth = new AuthStack(app, `canteras-auth-${deploy.name}`, { env, deploy });
+
+// Orígenes CORS del dashboard: lista separada por comas en ADMIN_ORIGINS. En prod es
+// obligatoria (ApiStack falla si falta); en dev, sin la variable, se usa http://localhost:5173.
+const adminOrigins = (process.env['ADMIN_ORIGINS'] ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter((o) => o !== '');
+new ApiStack(app, `canteras-api-${deploy.name}`, {
+  env,
+  deploy,
+  userPool: auth.userPool,
+  userPoolClient: auth.userPoolClient,
+  tables: {
+    stones: data.stones,
+    projects: data.projects,
+    finishes: data.finishes,
+    services: data.services,
+    auditLog: data.auditLog,
+  },
+  ...(adminOrigins.length > 0 ? { allowedOrigins: adminOrigins } : {}),
+});
 
 // Identidad de CI/CD (OIDC de GitHub). Los IDs numéricos salen de `gh api repos/<dueño>/<repo>`.
 // AWS permite un solo proveedor OIDC de GitHub por cuenta: si más adelante hay un CiStack de

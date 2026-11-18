@@ -1,0 +1,60 @@
+{
+  "ejemplo": true,
+  "aviso": "Datos de ejemplo, no reales.",
+  "items": [
+    {
+      "id": "casa-tepeyahualco",
+      "titulo": "Casa en Tepeyahualco",
+      "categoria": "fachadas",
+      "ubicacion": "Tepeyahualco, Puebla",
+      "anio": 2025,
+      "descripcion": "Fachada y sillería de una casa de campo. Proyecto de ejemplo.",
+      "superficie": "180 m²",
+      "piedras": ["arenisca", "cantera-rosa"],
+      "acabados": ["labrado", "cepillado"],
+      "piezasLabradas": 24,
+      "entrega": "6 semanas",
+      "testimonio": {
+        "texto": "Testimonio de ejemplo: quedamos muy contentos con el resultado.",
+        "autor": "Cliente de ejemplo"
+      },
+      "fotos": [],
+      "estado": "publicado",
+      "activa": true
+    },
+    {
+      "id": "atrio-nopalucan",
+      "titulo": "Atrio en Nopalucan",
+      "categoria": "restauracion",
+      "ubicacion": "Nopalucan, Puebla",
+      "anio": 2024,
+      "descripcion": "Restauración de un atrio con piezas labradas. Proyecto de ejemplo.",
+      "superficie": "320 m²",
+      "piedras": ["arenisca", "cantera-rosa", "recinto-negro"],
+      "acabados": ["cincelado", "envejecido", "martelinado"],
+      "piezasLabradas": 60,
+      "entrega": "10 semanas",
+      "testimonio": null,
+      "fotos": [],
+      "estado": "publicado",
+      "activa": true
+    },
+    {
+      "id": "cocina-san-andres",
+      "titulo": "Cocina en San Andrés",
+      "categoria": "cocinas",
+      "ubicacion": "San Andrés Cholula, Puebla",
+      "anio": 2026,
+      "descripcion": "Cubierta y muro de cocina en piedra clara. Proyecto de ejemplo en borrador.",
+      "superficie": "12 m²",
+      "piedras": ["caliza", "cantera-blanca"],
+      "acabados": ["apomazado"],
+      "piezasLabradas": null,
+      "entrega": "2 semanas",
+      "testimonio": null,
+      "fotos": [],
+      "estado": "borrador",
+      "activa": true
+    }
+  ]
+}

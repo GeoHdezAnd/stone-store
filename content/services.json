@@ -1,0 +1,48 @@
+{
+  "ejemplo": true,
+  "aviso": "Datos de ejemplo, no reales.",
+  "items": [
+    {
+      "id": "piedra-en-bruto",
+      "titulo": "Piedra en bruto",
+      "descripcion": "Bloques extraídos directamente de la cantera, listos para tu taller.",
+      "activa": true
+    },
+    {
+      "id": "cocinas-y-fachadas",
+      "titulo": "Cocinas y fachadas",
+      "descripcion": "Cubiertas, recubrimientos y fachadas cortados a medida.",
+      "activa": true
+    },
+    {
+      "id": "piezas-labradas",
+      "titulo": "Piezas labradas",
+      "descripcion": "Columnas, balaustres, molduras y esculturas talladas a mano.",
+      "activa": true
+    },
+    {
+      "id": "corte-a-medida",
+      "titulo": "Corte a medida",
+      "descripcion": "Servicio de ejemplo: corte de placas según tus planos.",
+      "activa": true
+    },
+    {
+      "id": "entrega-a-obra",
+      "titulo": "Entrega a obra",
+      "descripcion": "Servicio de ejemplo: flete y maniobra de descarga en tu obra.",
+      "activa": true
+    },
+    {
+      "id": "asesoria-de-obra",
+      "titulo": "Asesoría de obra",
+      "descripcion": "Servicio de ejemplo: te ayudamos a elegir piedra y acabado.",
+      "activa": true
+    },
+    {
+      "id": "visita-al-patio",
+      "titulo": "Visita al patio",
+      "descripcion": "Servicio de ejemplo: recorre el patio y elige tus piezas en persona.",
+      "activa": true
+    }
+  ]
+}

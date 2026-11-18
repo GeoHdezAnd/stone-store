@@ -1,0 +1,17 @@
+{
+  "ejemplo": true,
+  "aviso": "Datos de ejemplo, no reales. Latitud y longitud son aproximadas.",
+  "public": {
+    "nombrePatio": "Canteras Naturales (ejemplo)",
+    "direccion": "Dirección de ejemplo, San Salvador el Seco, Puebla, México",
+    "lat": 19.1,
+    "lng": -97.62,
+    "horario": "Lunes a sábado, 8:00 a 17:00 (ejemplo)",
+    "whatsapp": "525500000000",
+    "correoRemitente": "ventas@example.com"
+  },
+  "mail": {
+    "asuntoCotizacion": "Tu cotización {{folio}} de Canteras Naturales",
+    "plantillaCotizacion": "Hola {{nombre}},\n\nGracias por escribirnos. Esta es tu cotización con folio {{folio}}.\n\nPiedras: {{piedras}}\nFlete: {{flete}}\nTotal: {{total}}\n\nLa cotización tiene una vigencia de {{vigencia}}.\n\nSaludos,\nCanteras Naturales (correo de ejemplo)"
+  }
+}

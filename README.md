@@ -57,7 +57,7 @@ export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
 
 # Desde infra/ (donde vive cdk.json):
 npx cdk bootstrap aws://000000000000/us-east-1   # solo la primera vez o si se pierde el estado
-# Hay 2 stacks (canteras-site-dev y canteras-ci-dev): indica siempre cuál.
+# Hay 3 stacks (canteras-site-dev, canteras-data-dev y canteras-ci-dev): indica siempre cuál.
 npx cdk diff canteras-site-dev && npx cdk deploy canteras-site-dev --require-approval never
 
 # Desde la raíz: publicar la página provisional
@@ -69,6 +69,18 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION AWS_ENDPOINT_UR
 Verificar CloudFront en Floci: `curl -H "Host: <dominio>.cloudfront.net" http://localhost:4566/`. Antes de `cdk destroy`, vacía el bucket a mano (con Floci se apaga `autoDeleteObjects`).
 
 Nunca combines estas variables con credenciales reales: `infra/lib/config.ts` lo rechaza. Límites conocidos y detalles en la sección 9.2 de [CLAUDE.md](./CLAUDE.md).
+
+### Datos de ejemplo
+
+Tablas de DynamoDB (`canteras-data-dev`) y carga de los datos ficticios de `content/` (ver [content/README.md](./content/README.md)):
+
+```sh
+# Desde infra/:
+npx cdk diff canteras-data-dev && npx cdk deploy canteras-data-dev --require-approval never
+
+# Desde la raíz (no sobrescribe lo que ya exista; se puede repetir):
+npx tsx scripts/seed.ts
+```
 
 ## CI/CD (GitHub Actions + OIDC)
 

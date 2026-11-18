@@ -1,7 +1,13 @@
 # Floci: emulador local de AWS para las fases 1 a 4 (ver CLAUDE.md 9.2).
-# Con Compose, Floci inyecta AWS_ENDPOINT_URL=http://floci:4566 en los
-# contenedores de Lambda. Aun así, la Lambda de autoDeleteObjects de CDK falla
-# contra Floci (ECONNREFUSED al puerto 443): ver CLAUDE.md 9.2.
+#
+# Con Compose, Floci inyecta AWS_ENDPOINT_URL en los contenedores de Lambda. Aun así, la
+# Lambda de autoDeleteObjects de CDK falla contra Floci (ECONNREFUSED al puerto 443).
+#
+# IP fija: el JWT authorizer de API Gateway en Floci solo acepta issuers HTTP con una IP
+# LITERAL privada, y el `iss` de los tokens de Cognito sale de FLOCI_HOSTNAME. Con un nombre
+# (p. ej. `floci`) el authorizer responde 401 siempre. Por eso el contenedor lleva una IP fija
+# en una red propia y FLOCI_HOSTNAME es esa IP. Debe coincidir con FLOCI_IP en infra/lib/config.ts.
+# Si la subred 172.30.0.0/24 choca con otra red de Docker, cámbiala en AMBOS lugares.
 services:
   floci:
     image: floci/floci:latest
@@ -9,11 +15,23 @@ services:
     ports:
       - '4566:4566'
     environment:
-      FLOCI_HOSTNAME: floci
+      FLOCI_HOSTNAME: 172.30.0.10
+      FLOCI_SECURITY_ALLOW_PRIVATE_JWT_TARGETS: 'true'
+      # Origen del dashboard (Vite). Verificado con un solo origen; añadir otros con cuidado.
+      FLOCI_EXTRA_CORS_ALLOWED_ORIGINS: http://localhost:5173
     volumes:
       # Lambda corre en contenedores: el socket de Docker es obligatorio.
       - /var/run/docker.sock:/var/run/docker.sock
       - floci-data:/app/data
+    networks:
+      floci-net:
+        ipv4_address: 172.30.0.10
+
+networks:
+  floci-net:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 
 volumes:
   floci-data:
