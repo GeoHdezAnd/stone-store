@@ -1,0 +1,111 @@
+# Despliegue manual del sitio al entorno `dev` en AWS real.
+#
+# Flujo (CLAUDE.md 13: siempre mostrar `cdk diff` antes de `cdk deploy`):
+#   1. Ejecutar con accion=diff (valor por defecto), aprobar y leer el diff y el SHA en el log.
+#   2. Si es lo esperado, ejecutar con accion=deploy y pegar ese SHA en `sha_revisado`.
+#      El deploy solo avanza si el SHA coincide: lo desplegado es exactamente lo revisado,
+#      aunque `main` se haya movido entre las dos ejecuciones.
+#
+# Solo despliega SiteStack. CiStack (este mismo rol y el proveedor OIDC) se despliega a mano,
+# nunca desde CI: un rol que pudiera modificarse a sí mismo escalaría sus propios permisos.
+#
+# Requisitos en GitHub (ver README, sección CI/CD): environment `dev` con revisores obligatorios
+# y despliegue restringido a `main`; variables AWS_ROLE_ARN y AWS_ACCOUNT_ID.
+name: Deploy (dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      accion:
+        description: 'diff = solo mostrar cambios · deploy = desplegar y publicar el sitio'
+        type: choice
+        options: [diff, deploy]
+        default: diff
+      sha_revisado:
+        description: 'Solo para deploy: SHA completo que se vio en el diff (se imprime al inicio)'
+        type: string
+        default: ''
+
+# Permisos mínimos a nivel de workflow; el job añade solo id-token para pedir el token OIDC.
+permissions:
+  contents: read
+
+# Nunca dos despliegues a la vez, y no se cancela uno en curso.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # El environment `dev` exige aprobación manual (Settings → Environments → dev). Además, el
+    # `sub` del token OIDC incluye `environment:dev`, que es lo único que acepta el rol de AWS.
+    environment: dev
+    # No sustituye la restricción de ramas del environment (un YAML en otra rama podría quitar
+    # este `if`); es una segunda barrera.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      APP_ENV: dev
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # Con `id-token: write` el token OIDC queda al alcance de TODOS los pasos del job. Sin
+      # `--ignore-scripts`, el `postinstall` de una dependencia podría pedirlo y asumir el rol.
+      - name: Instalar dependencias (sin scripts de npm)
+        run: npm ci --ignore-scripts
+
+      - name: Verificar el SHA revisado
+        if: inputs.accion == 'deploy'
+        env:
+          SHA_REVISADO: ${{ inputs.sha_revisado }}
+        run: |
+          if [ "$SHA_REVISADO" != "$GITHUB_SHA" ]; then
+            echo "::error::El SHA a desplegar ($GITHUB_SHA) no coincide con sha_revisado. Ejecuta primero accion=diff y pega el SHA que imprime."
+            exit 1
+          fi
+
+      # El ARN del rol vive en una variable del repo/environment (AWS_ROLE_ARN), no en el código.
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Los logs de un repo público son públicos: se compara la cuenta sin imprimirla.
+      - name: Verificar la cuenta de AWS
+        env:
+          CUENTA_ESPERADA: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          actual="$(aws sts get-caller-identity --query Account --output text)"
+          if [ -z "$CUENTA_ESPERADA" ] || [ "$actual" != "$CUENTA_ESPERADA" ]; then
+            echo "::error::La cuenta de las credenciales no coincide con la variable AWS_ACCOUNT_ID."
+            exit 1
+          fi
+
+      # Siempre se muestra el diff, también antes de un deploy (queda en el log de esa ejecución).
+      - name: cdk diff
+        working-directory: infra
+        run: |
+          echo "SHA de esta ejecución: $GITHUB_SHA"
+          npx cdk diff canteras-site-dev
+
+      # La aprobación del environment ya ocurrió: por eso `--require-approval never`.
+      - name: cdk deploy
+        if: inputs.accion == 'deploy'
+        working-directory: infra
+        run: npx cdk deploy canteras-site-dev --require-approval never
+
+      - name: Publicar la página
+        if: inputs.accion == 'deploy'
+        run: npx tsx scripts/sync-site.ts

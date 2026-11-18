@@ -1,0 +1,55 @@
+# Verificaciones en cada PR y en cada push a main o release/dev. NO usa credenciales de AWS:
+# cualquier PR (incluso de un fork) puede correrlo sin acceso a la cuenta.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, release/dev]
+
+# Permisos mínimos: solo lectura del código.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Las actions de terceros van fijadas por SHA de commit (la etiqueta se puede mover).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Tipos (workspaces)
+        run: npm run typecheck
+
+      # `scripts/` no es un workspace: el typecheck anterior no lo cubre.
+      - name: Tipos (scripts)
+        run: npx tsc -p scripts --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formato
+        run: npx prettier --check .
+
+      - name: Pruebas
+        run: npm test
+
+      # Sin AWS_ENDPOINT_URL ni credenciales: solo verifica que los stacks sinteticen.
+      - name: Sintetizar la infraestructura
+        working-directory: infra
+        run: npx cdk synth --quiet

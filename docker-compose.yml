@@ -1,12 +1,13 @@
 # Floci: emulador local de AWS para las fases 1 a 4 (ver CLAUDE.md 9.2).
 # Con Compose, Floci inyecta AWS_ENDPOINT_URL=http://floci:4566 en los
-# contenedores de Lambda, que es lo que necesitan las custom resources de CDK.
+# contenedores de Lambda. Aun así, la Lambda de autoDeleteObjects de CDK falla
+# contra Floci (ECONNREFUSED al puerto 443): ver CLAUDE.md 9.2.
 services:
   floci:
     image: floci/floci:latest
     container_name: floci
     ports:
-      - "4566:4566"
+      - '4566:4566'
     environment:
       FLOCI_HOSTNAME: floci
     volumes:
