@@ -7,7 +7,16 @@ const FLOCI = { AWS_ENDPOINT_URL: 'http://localhost:4566' };
 describe('resolveEnv', () => {
   describe('APP_ENV', () => {
     it('usa dev en us-east-1 sin cuenta cuando no hay variables', () => {
-      expect(resolveEnv({})).toEqual({ name: 'dev', account: undefined, region: 'us-east-1' });
+      expect(resolveEnv({})).toEqual({
+        name: 'dev',
+        account: undefined,
+        region: 'us-east-1',
+        emulated: false,
+      });
+    });
+
+    it('marca emulated cuando hay AWS_ENDPOINT_URL (Floci)', () => {
+      expect(resolveEnv(FLOCI).emulated).toBe(true);
     });
 
     it('acepta dev explícito', () => {
@@ -94,7 +103,7 @@ describe('resolveEnv', () => {
     it('con CDK_DEFAULT_REGION devuelve el entorno completo', () => {
       expect(
         resolveEnv({ APP_ENV: 'prod', CDK_DEFAULT_ACCOUNT: REAL, CDK_DEFAULT_REGION: 'us-east-2' }),
-      ).toEqual({ name: 'prod', account: REAL, region: 'us-east-2' });
+      ).toEqual({ name: 'prod', account: REAL, region: 'us-east-2', emulated: false });
     });
   });
 });

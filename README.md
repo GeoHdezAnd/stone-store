@@ -33,7 +33,7 @@ Orden de fases (el dashboard del dueño va antes que el sitio público; detalle 
 
 1. **Fundamentos e infraestructura de hosting**, en curso:
    - [x] T0: repo, workspaces, TypeScript, lint con reglas de dependencias, pruebas y esqueleto de `infra`.
-   - [ ] T1: `SiteStack` en CDK (S3 privado + CloudFront con OAC) con página provisional, probado en Floci.
+   - [x] T1: `SiteStack` en CDK (S3 privado + CloudFront con OAC) con página provisional, probado en Floci. Lo que Floci no verifica (rechazo de lectura directa al bucket, OAC real) queda para T3.
    - [ ] T2: CI/CD con GitHub Actions y OIDC, con aprobación manual para desplegar.
    - [ ] T3: prueba de humo en AWS real (antes se revisa el `cdk diff`).
 2. Autenticación y dashboard de solicitudes (Cognito, DynamoDB, API de administración, `apps/admin`).
@@ -47,13 +47,23 @@ Orden de fases (el dashboard del dueño va antes que el sitio público; detalle 
 Floci es un emulador local de AWS. Se usa en las fases 1 a 3; la consola real solo para una prueba de humo por fase y para lo que el emulador no cubre.
 
 ```sh
-docker run -d --name floci -p 4566:4566 \
-  -v /var/run/docker.sock:/var/run/docker.sock -u root floci/floci:latest
+docker compose up -d        # desde la raíz; usa docker-compose.yml
 curl localhost:4566/_floci/health
 
 export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
        AWS_DEFAULT_REGION=us-east-1 AWS_ENDPOINT_URL=http://localhost:4566
+
+# Desde infra/ (donde vive cdk.json):
+npx cdk bootstrap aws://000000000000/us-east-1   # solo la primera vez o si se pierde el estado
+npx cdk diff && npx cdk deploy --require-approval never
+
+# Desde la raíz: publicar la página provisional
+npx tsx scripts/sync-site.ts
+
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION AWS_ENDPOINT_URL
 ```
+
+Verificar CloudFront en Floci: `curl -H "Host: <dominio>.cloudfront.net" http://localhost:4566/`. Antes de `cdk destroy`, vacía el bucket a mano (con Floci se apaga `autoDeleteObjects`).
 
 Nunca combines estas variables con credenciales reales: `infra/lib/config.ts` lo rechaza. Límites conocidos y detalles en la sección 9.2 de [CLAUDE.md](./CLAUDE.md).
 

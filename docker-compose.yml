@@ -1,0 +1,18 @@
+# Floci: emulador local de AWS para las fases 1 a 4 (ver CLAUDE.md 9.2).
+# Con Compose, Floci inyecta AWS_ENDPOINT_URL=http://floci:4566 en los
+# contenedores de Lambda, que es lo que necesitan las custom resources de CDK.
+services:
+  floci:
+    image: floci/floci:latest
+    container_name: floci
+    ports:
+      - "4566:4566"
+    environment:
+      FLOCI_HOSTNAME: floci
+    volumes:
+      # Lambda corre en contenedores: el socket de Docker es obligatorio.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - floci-data:/app/data
+
+volumes:
+  floci-data:

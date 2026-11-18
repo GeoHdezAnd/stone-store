@@ -4,9 +4,12 @@ import { describe, it } from 'vitest';
 
 import { StaticSite } from './static-site.js';
 
-function synth(ephemeral: boolean): Template {
+function synth(ephemeral: boolean, autoDeleteObjects?: boolean): Template {
   const stack = new Stack(new App(), 'Prueba');
-  new StaticSite(stack, 'Sitio', { ephemeral });
+  new StaticSite(stack, 'Sitio', {
+    ephemeral,
+    ...(autoDeleteObjects === undefined ? {} : { autoDeleteObjects }),
+  });
   return Template.fromStack(stack);
 }
 
@@ -70,6 +73,12 @@ describe('StaticSite', () => {
     const template = synth(true);
     template.hasResource('AWS::S3::Bucket', { DeletionPolicy: 'Delete' });
     template.resourceCountIs('Custom::S3AutoDeleteObjects', 1);
+  });
+
+  it('efímero con autoDeleteObjects apagado borra el bucket sin la Lambda de vaciado', () => {
+    const template = synth(true, false);
+    template.hasResource('AWS::S3::Bucket', { DeletionPolicy: 'Delete' });
+    template.resourceCountIs('Custom::S3AutoDeleteObjects', 0);
   });
 
   it('en prod conserva el bucket y no usa autoDeleteObjects', () => {

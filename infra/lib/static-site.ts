@@ -1,4 +1,4 @@
-import { CfnOutput, RemovalPolicy } from 'aws-cdk-lib';
+import { RemovalPolicy } from 'aws-cdk-lib';
 import {
   Distribution,
   PriceClass,
@@ -15,6 +15,12 @@ export interface StaticSiteProps {
    * En `prod` debe ser `false` (el bucket se conserva aunque se destruya el stack).
    */
   readonly ephemeral: boolean;
+  /**
+   * Si el bucket se vacía automáticamente al destruir el stack (Lambda de CDK).
+   * Por defecto sigue a `ephemeral`. Se apaga con Floci: esa Lambda no alcanza al
+   * emulador (ECONNREFUSED al puerto 443), así que el bucket se vacía a mano.
+   */
+  readonly autoDeleteObjects?: boolean;
 }
 
 /**
@@ -36,7 +42,7 @@ export class StaticSite extends Construct {
       encryption: BucketEncryption.S3_MANAGED,
       enforceSSL: true,
       removalPolicy: props.ephemeral ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
-      autoDeleteObjects: props.ephemeral,
+      autoDeleteObjects: props.ephemeral && (props.autoDeleteObjects ?? true),
     });
 
     this.distribution = new Distribution(this, 'Distribution', {
@@ -55,7 +61,5 @@ export class StaticSite extends Construct {
       // La clase más barata (NA y Europa): suficiente para un proyecto académico.
       priceClass: PriceClass.PRICE_CLASS_100,
     });
-
-    new CfnOutput(this, 'DistributionDomainName', { value: this.distribution.domainName });
   }
 }

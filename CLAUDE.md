@@ -325,9 +325,9 @@ canteras-naturales/
 
 ### 9.2 Desarrollo local con Floci
 - Emulador AWS local para las fases 1 a 4; la consola real solo para un smoke test por fase y para lo que Floci no cubre (DNS/ACM real, SES fuera de sandbox, caché y cabeceras reales de CloudFront, aplicación real de IAM, Location Service, Budgets).
-- Levantar: `docker run -d --name floci -p 4566:4566 -v /var/run/docker.sock:/var/run/docker.sock -u root floci/floci:latest` y salud en `curl localhost:4566/_floci/health`. El socket de Docker es obligatorio (Lambda corre en contenedores).
+- Levantar: `docker compose up -d` desde la raíz (usa `docker-compose.yml`, con el socket de Docker y un volumen de datos) y salud en `curl localhost:4566/_floci/health`. El socket de Docker es obligatorio (Lambda corre en contenedores).
 - Variables solo para Floci: `AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 AWS_ENDPOINT_URL=http://localhost:4566`; bootstrap con `npx cdk bootstrap aws://000000000000/us-east-1`. CDK respeta `AWS_ENDPOINT_URL`, no hace falta `cdklocal`.
-- Límites conocidos: no ejecuta CloudFront Functions, no soporta `ResponseHeadersPolicy` custom vía CloudFormation, y el JWT authorizer rechaza issuers privados salvo `FLOCI_SECURITY_ALLOW_PRIVATE_JWT_TARGETS=true`. Probar la lógica de esas piezas con tests unitarios y verificarlas en AWS real. Verificar en el smoke test: OAC, `defaultRootObject`, validación DNS de ACM y alias de Route 53.
+- Límites conocidos: no ejecuta CloudFront Functions, no soporta `ResponseHeadersPolicy` custom vía CloudFormation, el JWT authorizer rechaza issuers privados salvo `FLOCI_SECURITY_ALLOW_PRIVATE_JWT_TARGETS=true`, **no aplica bucket policy ni BlockPublicAccess** (un GET sin firma a S3 devuelve 200) y la Lambda de `autoDeleteObjects` falla con `ECONNREFUSED` al puerto 443 (también con Compose). Por eso `SiteStack` apaga `autoDeleteObjects` cuando hay `AWS_ENDPOINT_URL` (`DeployEnv.emulated`) y el bucket se vacía a mano antes de `cdk destroy`. Probar la lógica de esas piezas con tests unitarios y verificarlas en AWS real. Verificar en el smoke test: OAC, `defaultRootObject`, validación DNS de ACM y alias de Route 53.
 - Nunca usar credenciales reales con `AWS_ENDPOINT_URL` apuntando a Floci, ni al revés.
 - `autoDeleteObjects: true` solo en `dev`; jamás en `prod`.
 

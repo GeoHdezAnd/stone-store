@@ -2,6 +2,8 @@ export interface DeployEnv {
   name: 'dev' | 'prod';
   account: string | undefined;
   region: string;
+  /** `true` cuando se despliega contra un emulador (Floci) por `AWS_ENDPOINT_URL`. */
+  emulated: boolean;
 }
 
 // Cuenta ficticia que usa el emulador Floci (CLAUDE.md 9.2).
@@ -50,5 +52,5 @@ export function resolveEnv(env: NodeJS.ProcessEnv = process.env): DeployEnv {
     );
   }
 
-  return { name, account, region };
+  return { name, account, region, emulated: usesEmulator };
 }

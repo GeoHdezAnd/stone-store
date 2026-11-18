@@ -11,3 +11,4 @@ coverage
 # Herramientas locales de agentes: contienen rutas de tu máquina
 .atl/
 .claude/settings.local.json
+docs/
