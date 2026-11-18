@@ -25,6 +25,10 @@ const REDACTED_FRAGMENTS = [
   'whatsapp',
   'customer',
   'nombre',
+  // URLs prefirmadas de S3: la URL y su firma son secretos de corta vida.
+  'url',
+  'signature',
+  'credential',
 ];
 
 const MAX_DEPTH = 8;
@@ -33,6 +37,11 @@ const MAX_LINE = 16 * 1024;
 // Todos los regex están acotados y se aplican sobre cadenas ya truncadas (anti-ReDoS).
 // Limitación documentada: correos ofuscados como `juan[at]x.com` NO se enmascaran.
 const EMAIL_RE = /[^\s@]{1,64}@[^\s@]{1,255}/g;
+// Parámetros de firma de S3 (`X-Amz-Signature=...`) dentro de un texto libre, crudos o con la URL
+// codificada (`=` como %3D, hasta 4 niveles de %25). El valor termina en `&`, `%26`, espacio,
+// comilla o fin. Acotado (2048 y hasta 4 niveles) para evitar ReDoS.
+const SIGNED_PARAM_RE =
+  /X-Amz-(?:Signature|Credential|Security-Token)(?:=|%(?:25){0,4}3D)(?:(?!%(?:25){0,4}26)[^&\s"'`]){0,2048}/gi;
 const DIGITS_RE = /(?:\+?\d[\s().-]{0,2}){10,20}/g;
 
 function isSensitiveKey(key: string): boolean {
@@ -40,9 +49,24 @@ function isSensitiveKey(key: string): boolean {
   return REDACTED_FRAGMENTS.some((f) => k.includes(f));
 }
 
+// Un UUID no es un dato personal y sus dígitos con guiones parecen un teléfono: se conserva
+// tal cual (las claves de S3 llevan uno) y solo se enmascara el resto del texto.
+const UUID_SPLIT_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+
 function maskString(s: string): string {
   const t = s.length > MAX_STRING ? `${s.slice(0, MAX_STRING)}…[truncated]` : s;
-  return t.replace(EMAIL_RE, '[email]').replace(DIGITS_RE, '[digits]');
+  // Con grupo de captura, `split` deja los UUID en los índices impares.
+  return t
+    .split(UUID_SPLIT_RE)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part
+            .replace(SIGNED_PARAM_RE, 'X-Amz-[redacted]=[redacted]')
+            .replace(EMAIL_RE, '[email]')
+            .replace(DIGITS_RE, '[digits]'),
+    )
+    .join('');
 }
 
 function sanitize(value: unknown, depth: number, seen: WeakSet<object>): unknown {

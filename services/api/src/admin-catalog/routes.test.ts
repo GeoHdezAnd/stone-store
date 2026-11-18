@@ -681,3 +681,45 @@ describe('conflicto de transacción', () => {
     }
   });
 });
+
+describe('las fotos deben pertenecer a la entidad (422)', () => {
+  const UUID = '3f2b8c1e-9a4d-4e6b-8c7a-1d2e3f4a5b6c';
+  const casos = [
+    [
+      'stones',
+      'stone',
+      { fotos: [`stones/otra/${UUID}.jpg`] },
+      { fotos: [`stones/arenisca/${UUID}.jpg`] },
+    ],
+    [
+      'projects',
+      'project',
+      { fotos: [`projects/otro/${UUID}.jpg`] },
+      { fotos: [`projects/casa-tepeyahualco/${UUID}.jpg`] },
+    ],
+    [
+      'finishes',
+      'finish',
+      { foto: `finishes/otro/${UUID}.jpg` },
+      { foto: `finishes/apomazado/${UUID}.jpg` },
+    ],
+  ] as const;
+
+  it.each(casos)(
+    '%s: POST y PUT con foto ajena dan 422; con foto propia pasan',
+    async (seg_, nombre, mala, buena) => {
+      const { call } = setup();
+      const item = valid[nombre];
+      const post = await call({ method: 'POST', path: `/admin/${seg_}`, body: item(mala) });
+      expect(post.status).toBe(422);
+      expect(post.json.error).toBe('validation_error');
+      expect(post.text).not.toContain('otr');
+      const ok = await call({ method: 'POST', path: `/admin/${seg_}`, body: item(buena) });
+      expect(ok.status).toBe(201);
+      const id = item().id as string;
+      const put = await call({ method: 'PUT', path: `/admin/${seg_}/${id}`, body: item(mala) });
+      expect(put.status).toBe(422);
+      expect(put.text).not.toContain('otr');
+    },
+  );
+});

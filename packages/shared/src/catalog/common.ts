@@ -58,3 +58,28 @@ export function uniqueArray<T extends z.ZodType>(item: T, max: number, label = '
 export function idList(max: number, label = 'La lista de ids') {
   return uniqueArray(idSchema, max, label);
 }
+
+/**
+ * Exige que cada foto viva bajo `<carpeta>/<id de ESA entidad>/`. Sin esto, un registro podría
+ * referenciar fotos de otra entidad (o inexistentes) solo por conocer su id. El mensaje no
+ * reproduce la clave enviada.
+ */
+export function addPhotoOwnershipIssues(
+  ctx: z.RefinementCtx,
+  folder: PhotoFolder,
+  id: string,
+  photos: readonly string[],
+  path: (string | number)[],
+  single = false,
+): void {
+  const prefix = `${folder}/${id}/`;
+  photos.forEach((photo, i) => {
+    if (!photo.startsWith(prefix)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: single ? path : [...path, i],
+        message: `La foto debe pertenecer a esta entidad (carpeta ${folder}/<id de la entidad>/)`,
+      });
+    }
+  });
+}

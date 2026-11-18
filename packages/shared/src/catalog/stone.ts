@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { idList, idSchema, photoKeySchema, text, textOrEmpty, uniqueArray } from './common';
+import {
+  addPhotoOwnershipIssues,
+  idList,
+  idSchema,
+  photoKeySchema,
+  text,
+  textOrEmpty,
+  uniqueArray,
+} from './common';
 
 // Categorías de uso. PROPUESTA: los slugs se derivan de las 6 categorías de
 // CLAUDE.md 5.1 (Pisos, Fachadas, Cubiertas de cocina, Escultura y ornamento,
@@ -90,6 +98,7 @@ export const stoneSchema = z
     activa: z.boolean({ error: 'activa debe ser verdadero o falso' }),
   })
   .superRefine((stone, ctx) => {
+    addPhotoOwnershipIssues(ctx, 'stones', stone.id, stone.fotos, ['fotos']);
     if (stone.vendidaPor.includes('pieza') && stone.pesoKgPorPieza === null) {
       ctx.addIssue({
         code: 'custom',

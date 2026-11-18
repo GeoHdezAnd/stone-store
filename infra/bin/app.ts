@@ -4,6 +4,8 @@ import { AuthStack } from '../lib/auth-stack.js';
 import { CiStack } from '../lib/ci-stack.js';
 import { resolveEnv } from '../lib/config.js';
 import { DataStack } from '../lib/data-stack.js';
+import { MediaStack } from '../lib/media-stack.js';
+import { validateAllowedOrigins } from '../lib/origins.js';
 import { SiteStack } from '../lib/site-stack.js';
 
 const deploy = resolveEnv();
@@ -21,16 +23,30 @@ const data = new DataStack(app, `canteras-data-${deploy.name}`, { env, deploy })
 const auth = new AuthStack(app, `canteras-auth-${deploy.name}`, { env, deploy });
 
 // Orígenes CORS del dashboard: lista separada por comas en ADMIN_ORIGINS. En prod es
-// obligatoria (ApiStack falla si falta); en dev, sin la variable, se usa http://localhost:5173.
+// obligatoria (falla si falta); en dev, sin la variable, se usa http://localhost:5173.
+// Se validan UNA vez y se pasan a la API y al bucket de media (mismos orígenes en ambos).
 const adminOrigins = (process.env['ADMIN_ORIGINS'] ?? '')
   .split(',')
   .map((o) => o.trim())
   .filter((o) => o !== '');
+const allowedOrigins = validateAllowedOrigins(
+  deploy,
+  adminOrigins.length > 0 ? adminOrigins : undefined,
+);
+
+// Fotos del catálogo: bucket privado al que el dashboard sube con URL prefirmada.
+const media = new MediaStack(app, `canteras-media-${deploy.name}`, {
+  env,
+  deploy,
+  allowedOrigins,
+});
+
 new ApiStack(app, `canteras-api-${deploy.name}`, {
   env,
   deploy,
   userPool: auth.userPool,
   userPoolClient: auth.userPoolClient,
+  mediaBucket: media.bucket,
   tables: {
     stones: data.stones,
     projects: data.projects,
@@ -38,7 +54,7 @@ new ApiStack(app, `canteras-api-${deploy.name}`, {
     services: data.services,
     auditLog: data.auditLog,
   },
-  ...(adminOrigins.length > 0 ? { allowedOrigins: adminOrigins } : {}),
+  allowedOrigins,
 });
 
 // Identidad de CI/CD (OIDC de GitHub). Los IDs numéricos salen de `gh api repos/<dueño>/<repo>`.

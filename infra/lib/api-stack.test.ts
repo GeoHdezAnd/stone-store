@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { App, Tags } from 'aws-cdk-lib';
@@ -13,6 +13,8 @@ import { ApiStack, jwtIssuer, validateAllowedOrigins } from './api-stack.js';
 import { AuthStack } from './auth-stack.js';
 import { FLOCI_API_PORT, FLOCI_IP } from './config.js';
 import { DataStack } from './data-stack.js';
+import { MEDIA_ENTITIES } from '@canteras/shared';
+import { MediaStack } from './media-stack.js';
 
 const REPO = join(import.meta.dirname, '..', '..');
 
@@ -22,7 +24,12 @@ interface BuildOptions {
   allowedOrigins?: string[];
 }
 
-function build(opts: BuildOptions = {}): { stack: ApiStack; auth: AuthStack; data: DataStack } {
+function build(opts: BuildOptions = {}): {
+  stack: ApiStack;
+  auth: AuthStack;
+  data: DataStack;
+  media: MediaStack;
+} {
   const { name = 'dev', emulated = false, allowedOrigins } = opts;
   // Se omite el bundling con esbuild para que la síntesis sea rápida; el synth real de
   // `cdk synth` sí empaqueta.
@@ -30,10 +37,15 @@ function build(opts: BuildOptions = {}): { stack: ApiStack; auth: AuthStack; dat
   const deploy = { name, account: undefined, region: 'us-east-1', emulated } as const;
   const auth = new AuthStack(app, 'Auth', { deploy });
   const data = new DataStack(app, 'Data', { deploy });
+  const media = new MediaStack(app, 'Media', {
+    deploy,
+    allowedOrigins: validateAllowedOrigins(deploy, allowedOrigins),
+  });
   const stack = new ApiStack(app, 'Api', {
     deploy,
     userPool: auth.userPool,
     userPoolClient: auth.userPoolClient,
+    mediaBucket: media.bucket,
     tables: {
       stones: data.stones,
       projects: data.projects,
@@ -45,7 +57,7 @@ function build(opts: BuildOptions = {}): { stack: ApiStack; auth: AuthStack; dat
   });
   Tags.of(app).add('Project', 'canteras-naturales');
   Tags.of(app).add('Env', name);
-  return { stack, auth, data };
+  return { stack, auth, data, media };
 }
 const synth = (opts: BuildOptions = {}): Template => Template.fromStack(build(opts).stack);
 
@@ -107,6 +119,8 @@ describe('ApiStack: invariante de seguridad de las rutas', () => {
         'ANY /admin/finishes/{proxy+}',
         'ANY /admin/me',
         'ANY /admin/me/{proxy+}',
+        'ANY /admin/media',
+        'ANY /admin/media/{proxy+}',
         'ANY /admin/projects',
         'ANY /admin/projects/{proxy+}',
         'ANY /admin/services',
@@ -327,14 +341,15 @@ describe('ApiStack: Lambdas', () => {
       'services/api/src/health/handler.ts',
       'services/api/src/admin-me/handler.ts',
       'services/api/src/admin-catalog/handler.ts',
+      'services/api/src/admin-media/handler.ts',
     ]) {
       expect(existsSync(join(REPO, p)), p).toBe(true);
     }
   });
 
-  it('hay 3 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
+  it('hay 4 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Lambda::Function', 3);
+    t.resourceCountIs('AWS::Lambda::Function', 4);
     t.allResourcesProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
       MemorySize: 256,
@@ -345,7 +360,7 @@ describe('ApiStack: Lambdas', () => {
 
   it('cada función tiene su log group con retención de 1 semana (sin logRetention)', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Logs::LogGroup', 3);
+    t.resourceCountIs('AWS::Logs::LogGroup', 4);
     t.allResourcesProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
     t.allResourcesProperties('AWS::Lambda::Function', {
       LoggingConfig: { LogGroup: { Ref: Match.stringLikeRegexp('Logs') } },
@@ -387,6 +402,8 @@ describe('ApiStack: Lambdas', () => {
       'GET /health': /Health/,
       'ANY /admin/me': /AdminMe/,
       'ANY /admin/me/{proxy+}': /AdminMe/,
+      'ANY /admin/media': /AdminMedia/,
+      'ANY /admin/media/{proxy+}': /AdminMedia/,
       ...Object.fromEntries(
         RECURSOS_CATALOGO.flatMap((x) => [
           [`ANY /admin/${x}`, /AdminCatalog/],
@@ -430,7 +447,7 @@ type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-ex
 /** Id lógico (en la plantilla de ApiStack) de una función por fragmento de nombre. */
 function idFuncion(t: Template, fragmento: string): string {
   const ids = Object.keys(t.findResources('AWS::Lambda::Function')).filter((id) =>
-    id.includes(fragmento),
+    id.includes(`${fragmento}Function`),
   );
   expect(ids, `función ${fragmento}`).toHaveLength(1);
   return ids[0]!;
@@ -596,7 +613,7 @@ describe('ApiStack: Lambda AdminCatalog', () => {
 
   it('Health y AdminMe NO reciben permisos de DynamoDB', () => {
     const t = synth();
-    for (const f of ['Health', 'AdminMe']) {
+    for (const f of ['Health', 'AdminMe', 'AdminMedia']) {
       const todas = JSON.stringify(sentenciasDe(t, f));
       expect(todas, f).not.toContain('dynamodb');
     }
@@ -615,7 +632,7 @@ describe('ApiStack: Lambda AdminCatalog', () => {
       expect(JSON.stringify(p['SourceArn'])).toContain('HttpApi');
       expect(JSON.stringify(p['SourceArn'])).not.toContain('"*"');
     }
-    // Cada una de las 3 funciones tiene al menos un permiso.
+    // Cada una de las 4 funciones tiene al menos un permiso.
     const fns = Object.keys(t.findResources('AWS::Lambda::Function'));
     for (const f of fns) {
       expect(
@@ -623,5 +640,210 @@ describe('ApiStack: Lambda AdminCatalog', () => {
         f,
       ).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Lambda AdminMedia: URLs prefirmadas de subida. IAM mínimo: solo s3:PutObject por prefijo.
+// ---------------------------------------------------------------------------------------------
+
+describe('ApiStack: Lambda AdminMedia', () => {
+  it('las 2 rutas de media integran la Lambda AdminMedia y todas son JWT', () => {
+    const t = synth();
+    const fn = idFuncion(t, 'AdminMedia');
+    const integraciones = t.findResources('AWS::ApiGatewayV2::Integration');
+    let n = 0;
+    for (const r of rutas(t)) {
+      const key = r['RouteKey'] as string;
+      if (!key.startsWith('ANY /admin/media')) continue;
+      expect(r['AuthorizationType'], key).toBe('JWT');
+      const target = JSON.stringify(r['Target']);
+      const idInt = Object.keys(integraciones).find((id) => target.includes(`"${id}"`))!;
+      expect(JSON.stringify(integraciones[idInt]!.Properties.IntegrationUri), key).toContain(
+        `"${fn}"`,
+      );
+      n++;
+    }
+    expect(n).toBe(2);
+  });
+
+  it('MEDIA_BUCKET referencia el bucket de MediaStack (no es un literal)', () => {
+    const { stack, media } = build();
+    const t = Template.fromStack(stack);
+    const mt = Template.fromStack(media);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminMedia')]!;
+    const vars = fn.Properties.Environment.Variables as Record<string, Json>;
+    expect(typeof vars['MEDIA_BUCKET']).toBe('object');
+    const nombre = vars['MEDIA_BUCKET']!['Fn::ImportValue'] as string;
+    const outputs = mt.toJSON().Outputs as Record<
+      string,
+      { Value: Json; Export?: { Name: string } }
+    >;
+    const out = Object.values(outputs).find((o) => o.Export?.Name === nombre);
+    expect(out, 'exportación del bucket').toBeDefined();
+    const idBucket = media.getLogicalId(media.bucket.node.defaultChild as never);
+    expect(out!.Value['Ref']).toBe(idBucket);
+  });
+
+  it('S3_PUBLIC_ENDPOINT solo existe con emulador y apunta a localhost:<puerto de Floci>', () => {
+    const vars = (emulated: boolean): Record<string, unknown> => {
+      const t = synth({ emulated });
+      return t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminMedia')]!.Properties
+        .Environment.Variables;
+    };
+    expect(vars(false)['S3_PUBLIC_ENDPOINT']).toBeUndefined();
+    expect(Object.keys(vars(false)).sort()).toEqual(['MEDIA_BUCKET']);
+    expect(vars(true)['S3_PUBLIC_ENDPOINT']).toBe(`http://localhost:${FLOCI_API_PORT}`);
+    expect(Object.keys(vars(true)).sort()).toEqual(['MEDIA_BUCKET', 'S3_PUBLIC_ENDPOINT']);
+  });
+
+  it('IAM: SOLO s3:PutObject sobre los 3 prefijos (sin Get/List/Delete, sin s3:*, sin Resource *)', () => {
+    const { stack, media } = build();
+    const t = Template.fromStack(stack);
+    const mt = Template.fromStack(media);
+    const s3 = sentenciasDe(t, 'AdminMedia').filter((s) =>
+      lista(s['Action']).some((a) => String(a).startsWith('s3:')),
+    );
+    expect(s3, 'sin sentencias de S3 (prueba vacuosa)').toHaveLength(1);
+    const st = s3[0]!;
+    expect(st['Effect']).toBe('Allow');
+    expect(lista(st['Action'])).toEqual(['s3:PutObject']);
+    expect(st['Condition']).toBeUndefined();
+
+    const recursos = lista(st['Resource']) as Json[];
+    expect(recursos).toHaveLength(3);
+    const nombreExport = (r: Json): string => {
+      const partes = r['Fn::Join'][1] as unknown[];
+      const imp = partes.find(
+        (p) => typeof p === 'object' && p !== null && 'Fn::ImportValue' in p,
+      ) as Json;
+      return imp['Fn::ImportValue'] as string;
+    };
+    const sufijos = recursos.map((r) => {
+      expect(JSON.stringify(r)).not.toBe('"*"');
+      const partes = (r['Fn::Join'][1] as unknown[]).filter((p) => typeof p === 'string');
+      return partes.join('');
+    });
+    expect(sufijos.sort()).toEqual(['/finishes/*', '/projects/*', '/stones/*']);
+    // Y coinciden con las entidades de media de shared (si se agrega una carpeta allí, la
+    // política debe seguirla; este test falla si no se deriva).
+    expect(sufijos.sort()).toEqual(MEDIA_ENTITIES.map((e) => `/${e}/*`).sort());
+    // Los 3 ARN parten del ARN del bucket de MediaStack.
+    const outputs = mt.toJSON().Outputs as Record<
+      string,
+      { Value: Json; Export?: { Name: string } }
+    >;
+    for (const r of recursos) {
+      const out = Object.values(outputs).find((o) => o.Export?.Name === nombreExport(r));
+      expect(out?.Value['Fn::GetAtt']).toEqual([
+        media.getLogicalId(media.bucket.node.defaultChild as never),
+        'Arn',
+      ]);
+    }
+  });
+
+  it('IAM: ninguna sentencia de AdminMedia usa comodines, y fuera de S3 solo hay logs', () => {
+    const t = synth();
+    const todas = sentenciasDe(t, 'AdminMedia');
+    for (const s of todas) {
+      expect(JSON.stringify(s['Action'])).not.toContain('*');
+      expect(JSON.stringify(s['Resource'])).not.toBe('"*"');
+      for (const a of lista(s['Action']) as string[])
+        expect(a).toMatch(/^s3:PutObject$|^logs:|^xray:/);
+    }
+    const json = JSON.stringify(todas);
+    for (const prohibida of [
+      's3:GetObject',
+      's3:DeleteObject',
+      's3:ListBucket',
+      's3:*',
+      'dynamodb',
+    ]) {
+      expect(json).not.toContain(prohibida);
+    }
+  });
+
+  it('las otras Lambdas (Health, AdminMe, AdminCatalog) no reciben permisos de S3', () => {
+    const t = synth();
+    for (const f of ['Health', 'AdminMe', 'AdminCatalog']) {
+      expect(JSON.stringify(sentenciasDe(t, f)), f).not.toContain('s3:');
+    }
+  });
+
+  it('el bundle real de AdminMedia empaqueta S3 y el presigner (sin requires externos del SDK)', () => {
+    // Sin omitir el bundling: esbuild local (sin Docker) genera el asset de cada Lambda.
+    const app = new App();
+    const deploy = {
+      name: 'dev',
+      account: undefined,
+      region: 'us-east-1',
+      emulated: false,
+    } as const;
+    const auth = new AuthStack(app, 'Auth', { deploy });
+    const data = new DataStack(app, 'Data', { deploy });
+    const media = new MediaStack(app, 'Media', {
+      deploy,
+      allowedOrigins: ['http://localhost:5173'],
+    });
+    new ApiStack(app, 'Api', {
+      deploy,
+      userPool: auth.userPool,
+      userPoolClient: auth.userPoolClient,
+      mediaBucket: media.bucket,
+      tables: {
+        stones: data.stones,
+        projects: data.projects,
+        finishes: data.finishes,
+        services: data.services,
+        auditLog: data.auditLog,
+      },
+    });
+    const dir = app.synth().directory;
+    const bundles = readdirSync(dir)
+      .filter((d) => d.startsWith('asset.'))
+      .map((d) => join(dir, d, 'index.js'))
+      .filter((f) => existsSync(f))
+      .map((f) => readFileSync(f, 'utf8'));
+    const mediaBundle = bundles.find((b) => b.includes('media_upload_url_issued'));
+    expect(mediaBundle, 'no se encontró el bundle de AdminMedia').toBeDefined();
+    expect(mediaBundle).not.toMatch(
+      /require\(["']@aws-sdk\/(client-s3|s3-request-presigner)["']\)/,
+    );
+    // Prueba de que SÍ trae el código del presigner (firma SigV4 con query-string).
+    expect(mediaBundle).toContain('X-Amz-Signature');
+  }, 60_000);
+
+  it('en dev emulado y real, y en prod, la plantilla sigue sin custom resources', () => {
+    const { stack } = build({ emulated: true });
+    const tipos = Object.values(
+      Template.fromStack(stack).toJSON().Resources as Record<string, { Type: string }>,
+    ).map((r) => r.Type);
+    expect(tipos.filter((x) => x.startsWith('Custom::'))).toEqual([]);
+  });
+});
+
+describe('ApiStack: throttling por ruta de media', () => {
+  it('la etapa $default limita las 2 rutas de media a 1 rps / ráfaga 2 y conserva el default 10/20', () => {
+    const t = synth();
+    const stage = Object.values(t.findResources('AWS::ApiGatewayV2::Stage'))[0]!;
+    expect(stage.Properties.DefaultRouteSettings).toEqual({
+      ThrottlingRateLimit: 10,
+      ThrottlingBurstLimit: 20,
+    });
+    expect(stage.Properties.RouteSettings).toEqual({
+      'ANY /admin/media': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
+      'ANY /admin/media/{proxy+}': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
+    });
+  });
+
+  it('las claves de RouteSettings coinciden exactamente con las rutas reales de media', () => {
+    const t = synth();
+    const stage = Object.values(t.findResources('AWS::ApiGatewayV2::Stage'))[0]!;
+    const reales = rutas(t)
+      .map((r) => r['RouteKey'] as string)
+      .filter((k) => k.startsWith('ANY /admin/media'))
+      .sort();
+    expect(reales).toHaveLength(2);
+    expect(Object.keys(stage.Properties.RouteSettings).sort()).toEqual(reales);
   });
 });

@@ -1,6 +1,5 @@
 import { idSchema } from '@canteras/shared';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { ZodIssue } from 'zod';
 import { buildAuditEntry, type AuditAction, type AuditEntry } from '../lib/audit';
 import { HttpError, jsonResponse } from '../lib/http';
 import {
@@ -10,6 +9,7 @@ import {
   type Route,
   type RouterOptions,
 } from '../lib/router';
+import { validationErrorResponse } from '../lib/validation';
 import { decodeCursor, encodeCursor } from './cursor';
 import { ENTITIES, ENTITY_NAMES, type EntityConfig } from './entities';
 import {
@@ -31,41 +31,13 @@ const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 50;
 const LIMIT_RE = /^\d{1,3}$/;
 
-/** `testimonio.texto`, `piedras[0]`. Nunca incluye valores, solo la ruta del campo. */
-function formatPath(path: readonly PropertyKey[]): string {
-  let out = '';
-  for (const part of path) {
-    if (typeof part === 'number') out += `[${part}]`;
-    else out += out === '' ? String(part) : `.${String(part)}`;
-  }
-  return out;
-}
-
-// Los mensajes de zod ya vienen en español (los define packages/shared). Se sustituyen los que
-// de otro modo mencionarían nombres de claves enviadas por el cliente o saldrían en inglés.
-function toIssue(issue: ZodIssue): { path: string; message: string } {
-  if (issue.code === 'unrecognized_keys') {
-    return { path: formatPath(issue.path), message: 'El cuerpo incluye campos no permitidos' };
-  }
-  if (issue.code === 'invalid_type' && issue.path.length === 0) {
-    return { path: '', message: 'El cuerpo debe ser un objeto JSON' };
-  }
-  return { path: formatPath(issue.path), message: issue.message };
-}
-
 function validate(
   cfg: EntityConfig,
   body: unknown,
 ): { ok: true; item: CatalogItem } | { ok: false; res: Response } {
   const parsed = cfg.schema.safeParse(body);
   if (parsed.success) return { ok: true, item: parsed.data };
-  return {
-    ok: false,
-    res: jsonResponse(422, {
-      error: 'validation_error',
-      issues: parsed.error.issues.map(toIssue),
-    }),
-  };
+  return { ok: false, res: validationErrorResponse(parsed.error) };
 }
 
 function pathId(ctx: HandlerContext): string {
