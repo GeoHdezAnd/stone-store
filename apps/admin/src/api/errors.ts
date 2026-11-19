@@ -66,12 +66,17 @@ export class ApiError extends Error {
   readonly code: ApiErrorCode;
   readonly kind: ApiErrorKind;
   readonly issues?: ApiIssue[];
+  /** Solo en `invalid_reference`: campo con la referencia rota e ids que no existen. */
+  readonly field?: string;
+  readonly ids?: string[];
   readonly requestId?: string;
 
   constructor(init: {
     status: number;
     code: ApiErrorCode;
     issues?: ApiIssue[] | undefined;
+    field?: string | undefined;
+    ids?: string[] | undefined;
     requestId?: string | undefined;
   }) {
     super(`API ${init.status} ${init.code}`);
@@ -80,6 +85,8 @@ export class ApiError extends Error {
     this.code = init.code;
     this.kind = KIND[init.code];
     if (init.issues) this.issues = init.issues;
+    if (init.field) this.field = init.field;
+    if (init.ids) this.ids = init.ids;
     if (init.requestId) this.requestId = init.requestId;
   }
 }
@@ -106,6 +113,11 @@ const MESSAGES: Record<ApiErrorCode, string> = {
 
 /** Mensaje en español para mostrar. No expone detalles internos ni repite datos del usuario. */
 export function describeError(err: unknown): string {
-  if (err instanceof ApiError) return MESSAGES[err.code];
+  if (err instanceof ApiError) {
+    if (err.code === 'invalid_reference' && err.field && err.ids?.length) {
+      return `El campo «${err.field}» hace referencia a elementos que no existen: ${err.ids.join(', ')}.`;
+    }
+    return MESSAGES[err.code];
+  }
   return 'Ocurrió un error inesperado. Inténtalo de nuevo.';
 }

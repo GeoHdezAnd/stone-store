@@ -1,8 +1,10 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// En desarrollo, Floci no responde CORS en el endpoint de Cognito. El navegador llama a
-// `/cognito/` en el mismo origen y Vite reenvía la petición a Floci (solo `vite dev`).
+// En desarrollo, Floci no responde bien el CORS: en Cognito no responde nada y en la API
+// contesta el preflight (OPTIONS) con 401 porque le aplica el authorizer, y el navegador exige 2xx.
+// El navegador llama a `/cognito/` y `/_aws/` en el mismo origen (sin preflight) y Vite reenvía
+// la petición a Floci (solo `vite dev`).
 const FLOCI = 'http://localhost:4566';
 
 export default defineConfig({
@@ -14,6 +16,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/_aws': { target: FLOCI, changeOrigin: true },
       '/cognito': {
         target: FLOCI,
         changeOrigin: true,

@@ -5,6 +5,9 @@ import { createApiClient } from '../api/client';
 import { AuthProvider } from '../auth/AuthContext';
 import { RequireAuth, RequireRole } from '../auth/guards';
 import { createAuthService } from '../auth/service';
+import { CatalogRoutes } from '../catalog/CatalogRoutes';
+import { finishesConfig } from '../catalog/finishes';
+import { servicesConfig } from '../catalog/services';
 import type { AppConfig } from '../config';
 import { Layout } from './Layout';
 import { LoginPage } from '../pages/Login';
@@ -34,8 +37,22 @@ export function AppRoutes() {
         <Route index element={<Navigate to="/stones" replace />} />
         <Route path="stones" element={<Screen title="Piedras" />} />
         <Route path="projects" element={<Screen title="Proyectos" />} />
-        <Route path="finishes" element={<Screen title="Acabados" />} />
-        <Route path="services" element={<Screen title="Servicios" />} />
+        <Route
+          path="finishes/*"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <CatalogRoutes config={finishesConfig} />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="services/*"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <CatalogRoutes config={servicesConfig} />
+            </RequireRole>
+          }
+        />
         <Route path="settings" element={<Screen title="Configuración" />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
