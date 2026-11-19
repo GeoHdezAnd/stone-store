@@ -7,10 +7,16 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    }
+    },
+    "./fonts.css": "./src/fonts.css",
+    "./styles.css": "./src/styles.css",
+    "./admin.css": "./src/admin.css"
   },
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource/archivo": "5.3.0"
   }
 }

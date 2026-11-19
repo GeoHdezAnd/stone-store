@@ -12,3 +12,5 @@ coverage
 .atl/
 .claude/settings.local.json
 docs/
+# Configuración local del dashboard (valores de tu entorno; ver config.example.json)
+apps/admin/public/config.json

@@ -307,7 +307,7 @@ canteras-naturales/
 │                             # media, freight-config, settings, metrics, publish, users
 ├─ infra/                     # AWS CDK (TypeScript)
 │  └─ stacks: SiteStack (S3, CloudFront, [Route53, ACM opcionales]), ApiStack (API GW, Lambdas, IAM),
-│              DataStack (DynamoDB), MailStack (SES), AuthStack (Cognito), AdminSiteStack (S3+CloudFront del dashboard),
+│              DataStack (DynamoDB), MediaStack (S3 de fotos), MailStack (SES), AuthStack (Cognito), AdminSiteStack (S3+CloudFront del dashboard),
 │              ObservabilityStack (alarms, budgets)
 ├─ scripts/                   # importar CP, listar solicitudes, cargar FreightConfig
 └─ .github/workflows/         # CI/CD
@@ -318,7 +318,7 @@ canteras-naturales/
 - **Por qué `packages/shared` y no `services/api/shared`:** web, admin y Lambdas necesitan los mismos schemas y tipos, y un frontend no debe empaquetar el AWS SDK ni depender de una carpeta de servidor. Lo que toca AWS vive en `services/api/src/lib`.
 - **Paquetes internos:** `packages/*` se consumen directo desde el código fuente (`exports` → `src/index.ts`), sin paso de compilación previo. `tsc` solo verifica tipos (sin emitir); el empaquetado lo hacen Vite/Astro en los frontends y esbuild (`NodejsFunction`) en las Lambdas. `packages/*` no importa ningún paquete `@canteras/*` ni usa tipos de Node.
 - **Salvaguarda de entorno:** `infra/lib/config.ts` impide mezclar Floci con AWS real (con `AWS_ENDPOINT_URL` solo vale la cuenta `000000000000`, y esa cuenta nunca se usa sin el endpoint); `APP_ENV` solo acepta `dev` o `prod`, y `prod` exige cuenta explícita.
-- **Un stack por área, apilados por dependencia** (Data → Auth → Api → Site). Los stacks pueden recibir un flag de contexto para apagar piezas no soportadas por el emulador (p. ej. dominio/ACM).
+- **Un stack por área, apilados por dependencia** (Data → Auth → Media → Api → Site). Los stacks pueden recibir un flag de contexto para apagar piezas no soportadas por el emulador (p. ej. dominio/ACM).
 - **Despliegue del sitio:** `aws s3 sync` + invalidación desde CI (assets con hash `immutable`, HTML `no-cache`). No usar `BucketDeployment`: el contenido y la infra tienen ciclos de vida distintos (la fase 3 publica `catalog.json` fuera de CDK).
 - **Entornos:** `dev` y `prod` (cuentas o al menos stacks separados por prefijo).
 - **Permisos IAM** de **mínimo privilegio** por Lambda (solo las tablas/acciones que usa), vía `grant*` de CDK. Con una Lambda por recurso, el rol cubre únicamente las tablas de ese recurso y `AuditLog`; el aislamiento ya no es por endpoint, así que cada ruta del router debe verificar el rol y se prueba con tests. El rol de CI solo asume los roles de bootstrap de CDK (`cdk-*`) y tiene `s3 sync` + `cloudfront:CreateInvalidation`; ajustar la política de ejecución del bootstrap (`--cloudformation-execution-policies`) en lugar de dejar `AdministratorAccess`.
@@ -334,6 +334,7 @@ canteras-naturales/
 
 ## 10. Calidad, seguridad y costos
 - Lint + typecheck + tests en cada PR. Cobertura alta en `packages/shared` (flete y validaciones).
+- **Sin tests en el frontend (decisión del dueño):** `apps/web` y `apps/admin` **no llevan pruebas** (ni unitarias, ni de componentes, ni e2e) y no se instalan dependencias de prueba en ellas (Vitest, Testing Library, jsdom, Playwright, etc.). La lógica que sí debe probarse vive en `packages/shared` (dominio puro) y en `services/*`, que mantienen sus tests. En el frontend la verificación es `typecheck`, `lint`, `prettier --check`, `build` y la prueba manual en el navegador (ver `docs/pruebas-locales.md`). No agregues tests al frontend aunque la tarea sea crítica (p. ej. la sesión); si algo del frontend parece pedir una prueba, avísame en vez de escribirla. Un fallo de autenticación en el navegador se cubre con la revisión adversarial y con la validación del servidor, que es quien autoriza.
 - Sin secretos en el repo (usar SSM Parameter Store / Secrets Manager para claves de Turnstile, etc.).
 - Dashboard: MFA para `owner`, sesiones con expiración corta, `noindex`/`robots` bloqueado, CORS restringido al origen del admin, validación de rol en **cada** Lambda (no solo en el frontend), PII protegida (no en logs, no en URLs), auditoría de escrituras.
 - Cabeceras de seguridad en CloudFront (CSP, HSTS, X-Content-Type-Options).

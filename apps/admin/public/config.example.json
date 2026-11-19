@@ -1,0 +1,7 @@
+{
+  "apiUrl": "http://localhost:4566/_aws/execute-api/REEMPLAZA_CON_EL_ID_DE_LA_API/$default",
+  "userPoolId": "us-east-1_EJEMPLO",
+  "userPoolClientId": "REEMPLAZA_CON_EL_ID_DEL_CLIENTE",
+  "region": "us-east-1",
+  "cognitoEndpoint": "/cognito/"
+}
