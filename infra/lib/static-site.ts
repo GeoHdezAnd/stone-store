@@ -1,6 +1,8 @@
-import { RemovalPolicy } from 'aws-cdk-lib';
+import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 import {
   Distribution,
+  HeadersFrameOption,
+  HeadersReferrerPolicy,
   PriceClass,
   ResponseHeadersPolicy,
   ViewerProtocolPolicy,
@@ -21,6 +23,29 @@ export interface StaticSiteProps {
    * emulador (ECONNREFUSED al puerto 443), así que el bucket se vacía a mano.
    */
   readonly autoDeleteObjects?: boolean;
+  /**
+   * Para SPA (el dashboard): 403 y 404 devuelven `/index.html` con 200 y un TTL corto,
+   * así las rutas del cliente (`/piedras/arenisca`) cargan la app en vez de un error.
+   * Opt-in: el sitio público (Astro, páginas reales) no lo usa.
+   */
+  readonly spaFallback?: boolean;
+  /**
+   * Política de cabeceras propia (CSP, HSTS, nosniff, frame DENY, referrer-policy y,
+   * opcionalmente, `X-Robots-Tag`). Sin esta opción se usa la administrada SECURITY_HEADERS.
+   */
+  readonly responseHeaders?: StaticSiteResponseHeaders;
+}
+
+export interface StaticSiteResponseHeaders {
+  /** Valor completo de `Content-Security-Policy`. */
+  readonly contentSecurityPolicy: string;
+  /** Agrega `X-Robots-Tag: noindex, nofollow` (para áreas privadas). */
+  readonly noIndex?: boolean;
+  /**
+   * Apaga la política propia y vuelve a la administrada. Se usa con Floci, que no soporta
+   * `ResponseHeadersPolicy` personalizadas vía CloudFormation (CLAUDE.md 9.2).
+   */
+  readonly disabled?: boolean;
 }
 
 /**
@@ -45,6 +70,39 @@ export class StaticSite extends Construct {
       autoDeleteObjects: props.ephemeral && (props.autoDeleteObjects ?? true),
     });
 
+    const customHeaders = props.responseHeaders;
+    const headersPolicy =
+      customHeaders && customHeaders.disabled !== true
+        ? new ResponseHeadersPolicy(this, 'Headers', {
+            securityHeadersBehavior: {
+              contentSecurityPolicy: {
+                contentSecurityPolicy: customHeaders.contentSecurityPolicy,
+                override: true,
+              },
+              strictTransportSecurity: {
+                accessControlMaxAge: Duration.days(730),
+                includeSubdomains: true,
+                override: true,
+              },
+              contentTypeOptions: { override: true },
+              frameOptions: { frameOption: HeadersFrameOption.DENY, override: true },
+              referrerPolicy: {
+                referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+                override: true,
+              },
+            },
+            ...(customHeaders.noIndex === true
+              ? {
+                  customHeadersBehavior: {
+                    customHeaders: [
+                      { header: 'X-Robots-Tag', value: 'noindex, nofollow', override: true },
+                    ],
+                  },
+                }
+              : {}),
+          })
+        : ResponseHeadersPolicy.SECURITY_HEADERS;
+
     this.distribution = new Distribution(this, 'Distribution', {
       defaultRootObject: 'index.html',
       defaultBehavior: {
@@ -53,9 +111,19 @@ export class StaticSite extends Construct {
         // `exactOptionalPropertyTypes` (`Bucket.isWebsite` es opcional en la clase y obligatorio en la interfaz).
         origin: S3BucketOrigin.withOriginAccessControl(this.bucket as IBucket),
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-        // Política administrada de AWS (HSTS, nosniff, etc.). La CSP llega después.
-        responseHeadersPolicy: ResponseHeadersPolicy.SECURITY_HEADERS,
+        // Política propia (CSP, noindex) si se pidió; si no, la administrada de AWS.
+        responseHeadersPolicy: headersPolicy,
       },
+      ...(props.spaFallback === true
+        ? {
+            errorResponses: [403, 404].map((httpStatus) => ({
+              httpStatus,
+              responseHttpStatus: 200,
+              responsePagePath: '/index.html',
+              ttl: Duration.seconds(10),
+            })),
+          }
+        : {}),
       // minimumProtocolVersion se agrega junto con el dominio y el certificado ACM: sin
       // certificado propio CloudFront usa el predeterminado y la propiedad no tiene efecto.
       // La clase más barata (NA y Europa): suficiente para un proyecto académico.

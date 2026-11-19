@@ -1,4 +1,5 @@
 import { App, Tags } from 'aws-cdk-lib';
+import { AdminSiteStack } from '../lib/admin-site-stack.js';
 import { ApiStack } from '../lib/api-stack.js';
 import { AuthStack } from '../lib/auth-stack.js';
 import { CiStack } from '../lib/ci-stack.js';
@@ -18,6 +19,7 @@ const env = deploy.account
   : { region: deploy.region };
 
 new SiteStack(app, `canteras-site-${deploy.name}`, { env, deploy });
+new AdminSiteStack(app, `canteras-admin-site-${deploy.name}`, { env, deploy });
 const data = new DataStack(app, `canteras-data-${deploy.name}`, { env, deploy });
 
 const auth = new AuthStack(app, `canteras-auth-${deploy.name}`, { env, deploy });

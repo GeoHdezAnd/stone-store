@@ -1,17 +1,22 @@
 /**
- * Publica un directorio estático en el bucket del SiteStack e invalida CloudFront.
+ * Publica un directorio estático en el bucket del sitio público o del dashboard e invalida
+ * CloudFront.
  *
- * Uso: npx tsx scripts/sync-site.ts [directorio]   (por defecto: infra/placeholder)
+ * Uso: npx tsx scripts/sync-site.ts [--target site|admin] [directorio]
+ *   site  (por defecto): stack canteras-site-<env>, directorio infra/placeholder, assets _astro/
+ *   admin: stack canteras-admin-site-<env>, directorio apps/admin/dist, assets assets/
+ *          (antes: build del admin + `npx tsx scripts/admin-config.ts --out apps/admin/dist`)
+ * También se puede elegir con SYNC_TARGET=admin.
  * Variables: APP_ENV=dev|prod (por defecto dev). Con AWS_ENDPOINT_URL apunta a Floci.
  *
  * Usa el AWS CLI (no el SDK) y `execFileSync` con argumentos en arreglo: sin shell.
+ * La lógica (comandos, cabeceras de caché) vive en sync-site-lib.ts.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
-const IMMUTABLE = 'public, max-age=31536000, immutable';
-const NO_CACHE = 'no-cache';
+import { buildSyncCommands, parseSyncArgs, targetConfig } from './sync-site-lib';
 
 function aws(args: string[]): string {
   return execFileSync('aws', args, { encoding: 'utf8' });
@@ -39,54 +44,27 @@ function requireOutput(outputs: Record<string, string>, key: string, stack: stri
 }
 
 function main(): void {
-  const appEnv = process.env['APP_ENV'] ?? 'dev';
-  if (appEnv !== 'dev' && appEnv !== 'prod') {
-    throw new Error(`APP_ENV inválido: "${appEnv}". Usa "dev" o "prod".`);
-  }
-  // Misma salvaguarda que infra/lib/config.ts: prod nunca contra un emulador.
-  if (appEnv === 'prod' && process.env['AWS_ENDPOINT_URL']) {
-    throw new Error('APP_ENV=prod no puede usar AWS_ENDPOINT_URL (emulador).');
-  }
+  const args = parseSyncArgs(process.argv.slice(2), process.env);
+  const config = targetConfig(args.target, args.appEnv);
 
-  const dir = resolve(process.argv[2] ?? 'infra/placeholder');
+  const dir = resolve(args.dir ?? config.defaultDir);
   if (!existsSync(dir)) throw new Error(`No existe el directorio a publicar: ${dir}`);
+  for (const file of config.required) {
+    if (!existsSync(join(dir, file))) {
+      const hint =
+        file === 'config.json' ? ' Genéralo con: npx tsx scripts/admin-config.ts --out <dir>.' : '';
+      throw new Error(`Falta ${file} en ${dir}.${hint}`);
+    }
+  }
 
-  // Debe coincidir con el id del stack en infra/bin/app.ts.
-  const stackName = `canteras-site-${appEnv}`;
-  const outputs = readOutputs(stackName);
-  const bucket = requireOutput(outputs, 'BucketName', stackName);
-  const distributionId = requireOutput(outputs, 'DistributionId', stackName);
-  const target = `s3://${bucket}`;
+  const outputs = readOutputs(config.stackName);
+  const bucket = requireOutput(outputs, 'BucketName', config.stackName);
+  const distributionId = requireOutput(outputs, 'DistributionId', config.stackName);
 
-  // 1) Assets con hash (Astro los emite en _astro/): cacheables para siempre.
-  aws([
-    's3',
-    'sync',
-    dir,
-    target,
-    '--exclude',
-    '*',
-    '--include',
-    '_astro/*',
-    '--cache-control',
-    IMMUTABLE,
-  ]);
-  // 2) Todo lo demás (HTML, etc.): siempre revalidar. --delete limpia lo que ya no existe.
-  aws([
-    's3',
-    'sync',
-    dir,
-    target,
-    '--exclude',
-    '_astro/*',
-    '--cache-control',
-    NO_CACHE,
-    '--delete',
-  ]);
-  // 3) Invalidar para que CloudFront sirva el HTML nuevo.
-  aws(['cloudfront', 'create-invalidation', '--distribution-id', distributionId, '--paths', '/*']);
-
-  console.log(`Publicado ${dir} en ${target} e invalidada la distribución ${distributionId}.`);
+  for (const command of buildSyncCommands({ dir, bucket, distributionId, config })) {
+    aws(command);
+  }
+  console.log(`Publicado ${dir} en s3://${bucket} e invalidada la distribución ${distributionId}.`);
 }
 
 main();

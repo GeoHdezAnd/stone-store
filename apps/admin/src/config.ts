@@ -9,8 +9,16 @@ const httpUrl = z.string().refine((v) => {
   }
 }, 'Debe ser una URL http(s) válida');
 
+const LOCAL_HOSTS: readonly string[] = ['localhost', '127.0.0.1'];
+
+// La API recibe el token de acceso en cada petición: fuera de localhost solo se permite https.
+const apiUrl = httpUrl.refine((v) => {
+  const u = new URL(v);
+  return u.protocol === 'https:' || LOCAL_HOSTS.includes(u.hostname);
+}, 'apiUrl debe usar https (http solo en localhost o 127.0.0.1)');
+
 const schema = z.strictObject({
-  apiUrl: httpUrl,
+  apiUrl,
   userPoolId: z.string().min(1),
   userPoolClientId: z.string().min(1),
   region: z.string().min(1),

@@ -1,8 +1,8 @@
 import { App, Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { StaticSite } from './static-site.js';
+import { StaticSite, type StaticSiteProps } from './static-site.js';
 
 function synth(ephemeral: boolean, autoDeleteObjects?: boolean): Template {
   const stack = new Stack(new App(), 'Prueba');
@@ -85,5 +85,79 @@ describe('StaticSite', () => {
     const template = synth(false);
     template.hasResource('AWS::S3::Bucket', { DeletionPolicy: 'Retain' });
     template.resourceCountIs('Custom::S3AutoDeleteObjects', 0);
+  });
+
+  describe('opciones opt-in', () => {
+    function synthWith(options: Partial<StaticSiteProps>): Template {
+      const stack = new Stack(new App(), 'Prueba');
+      new StaticSite(stack, 'Sitio', { ephemeral: true, ...options });
+      return Template.fromStack(stack);
+    }
+
+    it('por defecto no agrega errores personalizados ni política propia', () => {
+      const template = synthWith({});
+      template.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 0);
+      const [dist] = Object.values(template.findResources('AWS::CloudFront::Distribution'));
+      expect(JSON.stringify(dist)).not.toContain('CustomErrorResponses');
+    });
+
+    it('spaFallback devuelve /index.html con 200 en 403 y 404', () => {
+      synthWith({ spaFallback: true }).hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: Match.objectLike({
+          CustomErrorResponses: [
+            {
+              ErrorCode: 403,
+              ResponseCode: 200,
+              ResponsePagePath: '/index.html',
+              ErrorCachingMinTTL: 10,
+            },
+            {
+              ErrorCode: 404,
+              ResponseCode: 200,
+              ResponsePagePath: '/index.html',
+              ErrorCachingMinTTL: 10,
+            },
+          ],
+        }),
+      });
+    });
+
+    it('responseHeaders crea una política con CSP y noindex', () => {
+      const template = synthWith({
+        responseHeaders: { contentSecurityPolicy: "default-src 'self'", noIndex: true },
+      });
+      template.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 1);
+      template.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
+        ResponseHeadersPolicyConfig: Match.objectLike({
+          SecurityHeadersConfig: Match.objectLike({
+            ContentSecurityPolicy: { ContentSecurityPolicy: "default-src 'self'", Override: true },
+          }),
+          CustomHeadersConfig: {
+            Items: [{ Header: 'X-Robots-Tag', Value: 'noindex, nofollow', Override: true }],
+          },
+        }),
+      });
+    });
+
+    it('sin noIndex no agrega X-Robots-Tag', () => {
+      const template = synthWith({
+        responseHeaders: { contentSecurityPolicy: "default-src 'self'" },
+      });
+      const [policy] = Object.values(
+        template.findResources('AWS::CloudFront::ResponseHeadersPolicy'),
+      );
+      expect(JSON.stringify(policy)).not.toContain('X-Robots-Tag');
+    });
+
+    it('responseHeaders.disabled (Floci) vuelve a la política administrada', () => {
+      const template = synthWith({
+        responseHeaders: {
+          contentSecurityPolicy: "default-src 'self'",
+          noIndex: true,
+          disabled: true,
+        },
+      });
+      template.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 0);
+    });
   });
 });
