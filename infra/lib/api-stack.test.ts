@@ -51,6 +51,7 @@ function build(opts: BuildOptions = {}): {
       projects: data.projects,
       finishes: data.finishes,
       services: data.services,
+      settings: data.settings,
       auditLog: data.auditLog,
     },
     ...(allowedOrigins ? { allowedOrigins } : {}),
@@ -125,6 +126,8 @@ describe('ApiStack: invariante de seguridad de las rutas', () => {
         'ANY /admin/projects/{proxy+}',
         'ANY /admin/services',
         'ANY /admin/services/{proxy+}',
+        'ANY /admin/settings',
+        'ANY /admin/settings/{proxy+}',
         'ANY /admin/stones',
         'ANY /admin/stones/{proxy+}',
         'GET /health',
@@ -342,14 +345,15 @@ describe('ApiStack: Lambdas', () => {
       'services/api/src/admin-me/handler.ts',
       'services/api/src/admin-catalog/handler.ts',
       'services/api/src/admin-media/handler.ts',
+      'services/api/src/admin-settings/handler.ts',
     ]) {
       expect(existsSync(join(REPO, p)), p).toBe(true);
     }
   });
 
-  it('hay 4 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
+  it('hay 5 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Lambda::Function', 4);
+    t.resourceCountIs('AWS::Lambda::Function', 5);
     t.allResourcesProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
       MemorySize: 256,
@@ -360,7 +364,7 @@ describe('ApiStack: Lambdas', () => {
 
   it('cada función tiene su log group con retención de 1 semana (sin logRetention)', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Logs::LogGroup', 4);
+    t.resourceCountIs('AWS::Logs::LogGroup', 5);
     t.allResourcesProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
     t.allResourcesProperties('AWS::Lambda::Function', {
       LoggingConfig: { LogGroup: { Ref: Match.stringLikeRegexp('Logs') } },
@@ -404,6 +408,8 @@ describe('ApiStack: Lambdas', () => {
       'ANY /admin/me/{proxy+}': /AdminMe/,
       'ANY /admin/media': /AdminMedia/,
       'ANY /admin/media/{proxy+}': /AdminMedia/,
+      'ANY /admin/settings': /AdminSettings/,
+      'ANY /admin/settings/{proxy+}': /AdminSettings/,
       ...Object.fromEntries(
         RECURSOS_CATALOGO.flatMap((x) => [
           [`ANY /admin/${x}`, /AdminCatalog/],
@@ -765,7 +771,7 @@ describe('ApiStack: Lambda AdminMedia', () => {
 
   it('las otras Lambdas (Health, AdminMe, AdminCatalog) no reciben permisos de S3', () => {
     const t = synth();
-    for (const f of ['Health', 'AdminMe', 'AdminCatalog']) {
+    for (const f of ['Health', 'AdminMe', 'AdminCatalog', 'AdminSettings']) {
       expect(JSON.stringify(sentenciasDe(t, f)), f).not.toContain('s3:');
     }
   });
@@ -795,6 +801,7 @@ describe('ApiStack: Lambda AdminMedia', () => {
         projects: data.projects,
         finishes: data.finishes,
         services: data.services,
+        settings: data.settings,
         auditLog: data.auditLog,
       },
     });
@@ -820,6 +827,172 @@ describe('ApiStack: Lambda AdminMedia', () => {
     ).map((r) => r.Type);
     expect(tipos.filter((x) => x.startsWith('Custom::'))).toEqual([]);
   });
+});
+
+describe('ApiStack: Lambda AdminSettings', () => {
+  const RUTAS = ['ANY /admin/settings', 'ANY /admin/settings/{proxy+}'];
+
+  it('las 2 rutas de settings integran la Lambda AdminSettings y son JWT', () => {
+    const t = synth();
+    const fn = idFuncion(t, 'AdminSettings');
+    const integraciones = t.findResources('AWS::ApiGatewayV2::Integration');
+    let n = 0;
+    for (const r of rutas(t)) {
+      const key = r['RouteKey'] as string;
+      if (!key.startsWith('ANY /admin/settings')) continue;
+      expect(RUTAS).toContain(key);
+      expect(r['AuthorizationType'], key).toBe('JWT');
+      const target = JSON.stringify(r['Target']);
+      const idInt = Object.keys(integraciones).find((id) => target.includes(`"${id}"`))!;
+      expect(JSON.stringify(integraciones[idInt]!.Properties.IntegrationUri), key).toContain(
+        `"${fn}"`,
+      );
+      n++;
+    }
+    expect(n).toBe(2);
+  });
+
+  it('el entorno tiene exactamente SETTINGS_TABLE y AUDIT_TABLE, como referencias a DataStack', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminSettings')]!;
+    const vars = fn.Properties.Environment.Variables as Record<string, Json>;
+    expect(Object.keys(vars).sort()).toEqual(['AUDIT_TABLE', 'SETTINGS_TABLE']);
+    const esperado: Record<string, unknown> = {
+      SETTINGS_TABLE: data.settings,
+      AUDIT_TABLE: data.auditLog,
+    };
+    for (const [nombre, tabla] of Object.entries(esperado)) {
+      const idEsperado = data.getLogicalId((tabla as Table).node.defaultChild as CfnTable);
+      expect(typeof vars[nombre], nombre).toBe('object'); // no es un literal
+      expect(tablaDeImport(dt, vars[nombre]!), nombre).toBe(idEsperado);
+    }
+  });
+
+  it('IAM EXACTA: GetItem en Settings; PutItem en Settings y en AuditLog solo dentro de una transacción', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const idDe = (tb: Table): string => data.getLogicalId(tb.node.defaultChild as CfnTable);
+    const settings = idDe(data.settings);
+    const auditoria = idDe(data.auditLog);
+
+    const dynamo = sentenciasDe(t, 'AdminSettings').filter((s) =>
+      lista(s['Action']).some((a) => String(a).startsWith('dynamodb:')),
+    );
+    expect(dynamo, 'sin sentencias de DynamoDB (prueba vacuosa)').toHaveLength(3);
+
+    const lectura: Json[] = [];
+    const escrituraSettings: Json[] = [];
+    const escrituraAudit: Json[] = [];
+    for (const s of dynamo) {
+      expect(s['Effect']).toBe('Allow');
+      for (const a of lista(s['Action']) as string[]) expect(a).not.toContain('*');
+      for (const r of lista(s['Resource'])) expect(JSON.stringify(r)).not.toBe('"*"');
+      const ids = tablasDeSentencia(dt, s);
+      expect(ids, 'una sola tabla por sentencia').toHaveLength(1);
+      const [tabla] = ids;
+      if (s['Condition'] === undefined) {
+        lectura.push(s);
+        expect(tabla).toBe(settings);
+      } else if (tabla === settings) escrituraSettings.push(s);
+      else if (tabla === auditoria) escrituraAudit.push(s);
+      else throw new Error(`sentencia sobre una tabla inesperada: ${String(tabla)}`);
+    }
+
+    // Lectura: SOLO GetItem (sin Scan, BatchGetItem ni Query) y sin condición.
+    expect(lectura).toHaveLength(1);
+    expect(lista(lectura[0]!['Action'])).toEqual(['dynamodb:GetItem']);
+    // Escritura de Settings: SOLO PutItem, dentro de una transacción.
+    expect(escrituraSettings).toHaveLength(1);
+    expect(lista(escrituraSettings[0]!['Action'])).toEqual(['dynamodb:PutItem']);
+    expect(escrituraSettings[0]!['Condition']).toEqual(CONDICION_TRANSACCION);
+    // Auditoría append-only: SOLO PutItem, dentro de una transacción.
+    expect(escrituraAudit).toHaveLength(1);
+    expect(lista(escrituraAudit[0]!['Action'])).toEqual(['dynamodb:PutItem']);
+    expect(escrituraAudit[0]!['Condition']).toEqual(CONDICION_TRANSACCION);
+  });
+
+  it('IAM: fuera de DynamoDB solo logs; sin S3, tablas de catálogo ni comodines', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const todas = sentenciasDe(t, 'AdminSettings');
+    for (const s of todas) {
+      expect(JSON.stringify(s['Action'])).not.toContain('*');
+      expect(JSON.stringify(s['Resource'])).not.toBe('"*"');
+      const acciones = lista(s['Action']) as string[];
+      if (!acciones.some((a) => a.startsWith('dynamodb:'))) {
+        for (const a of acciones) expect(a).toMatch(/^logs:|^xray:/);
+      }
+    }
+    expect(JSON.stringify(todas)).not.toContain('s3:');
+    const catalogo = [data.stones, data.projects, data.finishes, data.services].map((tb) =>
+      data.getLogicalId(tb.node.defaultChild as CfnTable),
+    );
+    for (const s of todas) {
+      if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
+      for (const id of tablasDeSentencia(dt, s)) expect(catalogo).not.toContain(id);
+    }
+  });
+
+  it('las otras Lambdas (Health, AdminMe, AdminCatalog, AdminMedia) NO ganan permisos sobre Settings', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const settings = data.getLogicalId(data.settings.node.defaultChild as CfnTable);
+    for (const f of ['Health', 'AdminMe', 'AdminCatalog', 'AdminMedia']) {
+      for (const s of sentenciasDe(t, f)) {
+        if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
+        expect(tablasDeSentencia(dt, s), f).not.toContain(settings);
+      }
+      const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, f)]!;
+      const vars = Object.keys(fn.Properties.Environment?.Variables ?? {});
+      expect(vars, f).not.toContain('SETTINGS_TABLE');
+    }
+  });
+
+  it('el bundle real de AdminSettings empaqueta zod y shared; solo el SDK de AWS queda externo (lo trae el runtime)', () => {
+    const app = new App();
+    const deploy = {
+      name: 'dev',
+      account: undefined,
+      region: 'us-east-1',
+      emulated: false,
+    } as const;
+    const auth = new AuthStack(app, 'Auth', { deploy });
+    const data = new DataStack(app, 'Data', { deploy });
+    const media = new MediaStack(app, 'Media', {
+      deploy,
+      allowedOrigins: ['http://localhost:5173'],
+    });
+    new ApiStack(app, 'Api', {
+      deploy,
+      userPool: auth.userPool,
+      userPoolClient: auth.userPoolClient,
+      mediaBucket: media.bucket,
+      tables: {
+        stones: data.stones,
+        projects: data.projects,
+        finishes: data.finishes,
+        services: data.services,
+        settings: data.settings,
+        auditLog: data.auditLog,
+      },
+    });
+    const dir = app.synth().directory;
+    const bundles = readdirSync(dir)
+      .filter((d) => d.startsWith('asset.'))
+      .map((d) => join(dir, d, 'index.js'))
+      .filter((f) => existsSync(f))
+      .map((f) => readFileSync(f, 'utf8'));
+    const bundle = bundles.find((b) => b.includes('settings_write'));
+    expect(bundle, 'no se encontró el bundle de AdminSettings').toBeDefined();
+    const externos = [...(bundle as string).matchAll(/require\("([^"]+)"\)/g)].map((m) => m[1]!);
+    for (const e of externos) expect(e, `require externo ${e}`).toMatch(/^@aws-sdk\/|^node:/);
+    expect(bundle).not.toContain('@canteras/shared');
+  }, 60_000);
 });
 
 describe('ApiStack: throttling por ruta de media', () => {

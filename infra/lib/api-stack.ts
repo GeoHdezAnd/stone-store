@@ -40,6 +40,7 @@ export interface ApiTables {
   readonly projects: TableRef;
   readonly finishes: TableRef;
   readonly services: TableRef;
+  readonly settings: TableRef;
   readonly auditLog: TableRef;
 }
 
@@ -97,6 +98,7 @@ export class ApiStack extends Stack {
   public readonly adminMeFunction: IFunction;
   public readonly adminCatalogFunction: IFunction;
   public readonly adminMediaFunction: IFunction;
+  public readonly adminSettingsFunction: IFunction;
 
   public constructor(scope: Construct, id: string, props: ApiStackProps) {
     const { deploy, userPool, userPoolClient, tables, mediaBucket, allowedOrigins, ...stackProps } =
@@ -246,6 +248,39 @@ export class ApiStack extends Stack {
       }),
     );
 
+    // Configuración del negocio (filas únicas PUBLIC y MAIL de Settings). Lectura con `GetItem`
+    // (sin Scan ni BatchGetItem: solo hay dos claves conocidas). La escritura es un `PutItem`
+    // dentro de una transacción (fila + auditoría), igual que el catálogo; no hay Update, Delete
+    // ni Query. Sin acceso a las tablas del catálogo ni a S3. Floci NO aplica IAM: verificar en
+    // AWS real.
+    const adminSettings = makeFunction('AdminSettings', 'admin-settings');
+    this.adminSettingsFunction = adminSettings;
+    adminSettings.addEnvironment('SETTINGS_TABLE', tables.settings.tableName);
+    adminSettings.addEnvironment('AUDIT_TABLE', tables.auditLog.tableName);
+    adminSettings.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [tables.settings.tableArn],
+      }),
+    );
+    adminSettings.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.settings.tableArn],
+        conditions: soloEnTransaccion,
+      }),
+    );
+    adminSettings.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.auditLog.tableArn],
+        conditions: soloEnTransaccion,
+      }),
+    );
+
     // ÚNICA ruta pública, marcada explícitamente.
     this.httpApi.addRoutes({
       path: '/health',
@@ -264,6 +299,7 @@ export class ApiStack extends Stack {
     };
     addAdminResource('me', this.adminMeFunction);
     addAdminResource('media', adminMedia);
+    addAdminResource('settings', adminSettings);
     for (const resource of ['stones', 'projects', 'finishes', 'services']) {
       addAdminResource(resource, adminCatalog);
     }

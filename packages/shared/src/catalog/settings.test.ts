@@ -4,6 +4,7 @@ import {
   mailSettingsSchema,
   publicSettingsSchema,
   renderMailTemplate,
+  SETTINGS_ROW_KEYS,
 } from './settings';
 
 // Datos de EJEMPLO (proyecto académico): los reales los da el dueño.
@@ -175,5 +176,11 @@ describe('renderMailTemplate', () => {
 
   it('lanza error si la plantilla usa una variable no permitida', () => {
     expect(() => renderMailTemplate('{{otra}}', valores)).toThrow(/otra/);
+  });
+});
+
+describe('SETTINGS_ROW_KEYS', () => {
+  it('son las claves de fila que usa el seed: PUBLIC y MAIL', () => {
+    expect(SETTINGS_ROW_KEYS).toEqual({ public: 'PUBLIC', mail: 'MAIL' });
   });
 });

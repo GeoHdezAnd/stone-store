@@ -52,6 +52,7 @@ new ApiStack(app, `canteras-api-${deploy.name}`, {
     projects: data.projects,
     finishes: data.finishes,
     services: data.services,
+    settings: data.settings,
     auditLog: data.auditLog,
   },
   allowedOrigins,

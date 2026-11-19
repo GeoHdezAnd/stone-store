@@ -68,6 +68,8 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION AWS_ENDPOINT_UR
 
 Verificar CloudFront en Floci: `curl -H "Host: <dominio>.cloudfront.net" http://localhost:4566/`. Antes de `cdk destroy`, vacía el bucket a mano (con Floci se apaga `autoDeleteObjects`).
 
+Guía para probar la API con `curl` (tokens, usuarios de prueba y resultados esperados): [docs/pruebas-locales.md](./docs/pruebas-locales.md).
+
 Nunca combines estas variables con credenciales reales: `infra/lib/config.ts` lo rechaza. Límites conocidos y detalles en la sección 9.2 de [CLAUDE.md](./CLAUDE.md).
 
 ### Datos de ejemplo

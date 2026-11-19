@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { text } from './common';
 
+// Valores de la clave de partición (`key`) de las dos filas únicas de la tabla Settings.
+// El seed y la API de administración deben usar los mismos.
+export const SETTINGS_ROW_KEYS = { public: 'PUBLIC', mail: 'MAIL' } as const;
+
 // Fila PUBLIC de Settings (CLAUDE.md 5.5 y 6.2).
 // Los valores reales (patio, WhatsApp, correo) los da el dueño; los del seed son DE EJEMPLO.
 export const publicSettingsSchema = z.strictObject({

@@ -13,6 +13,7 @@ import {
   projectSchema,
   publicSettingsSchema,
   serviceSchema,
+  SETTINGS_ROW_KEYS,
   stoneSchema,
 } from '../packages/shared/src/index';
 
@@ -158,8 +159,8 @@ export function buildSeedPlan(raw: RawContent): SeedTable[] {
       table: 'Settings',
       key: 'key',
       items: [
-        { key: 'PUBLIC', ...pub.data },
-        { key: 'MAIL', ...mail.data },
+        { key: SETTINGS_ROW_KEYS.public, ...pub.data },
+        { key: SETTINGS_ROW_KEYS.mail, ...mail.data },
       ],
     },
   ];
