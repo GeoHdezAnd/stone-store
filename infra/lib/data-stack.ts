@@ -1,8 +1,15 @@
 import { CfnOutput, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
-import { AttributeType, BillingMode, Table } from 'aws-cdk-lib/aws-dynamodb';
+import { AttributeType, BillingMode, ProjectionType, Table } from 'aws-cdk-lib/aws-dynamodb';
 import { type Construct } from 'constructs';
 
 import { type DeployEnv } from './config.js';
+
+/**
+ * GSI disperso de AuditLog: `scope` (partición) + `sk` (orden por fecha). Solo se indexan los
+ * ítems que tienen `scope` (`CATALOG`: lo que entra a catalog.json), para listar los «cambios
+ * pendientes de publicar» con una Query en vez de escanear la auditoría completa.
+ */
+export const AUDIT_SCOPE_INDEX = 'scope-sk-index';
 
 export interface DataStackProps extends StackProps {
   readonly deploy: DeployEnv;
@@ -10,8 +17,8 @@ export interface DataStackProps extends StackProps {
 
 /**
  * Datos del negocio en DynamoDB (on-demand: pagas por uso, casi gratis con poco tráfico).
- * Sin índices secundarios ni TTL por ahora; llegan con las fases que los necesiten
- * (`Quotes` y `FreightConfig` se agregan en la fase 3).
+ * Un solo índice secundario por ahora (el GSI disperso de AuditLog) y sin TTL; el resto llega con
+ * las fases que lo necesiten (`Quotes` se agrega en la fase 3.3).
  */
 export class DataStack extends Stack {
   public readonly stones: Table;
@@ -22,6 +29,7 @@ export class DataStack extends Stack {
   public readonly auditLog: Table;
   public readonly publications: Table;
   public readonly counters: Table;
+  public readonly freightConfig: Table;
 
   public constructor(scope: Construct, id: string, props: DataStackProps) {
     const { deploy, ...stackProps } = props;
@@ -65,7 +73,20 @@ export class DataStack extends Stack {
     this.settings = make('Settings', string('key'));
     // pk = `ENTITY#<tipo>#<id>`, sk = marca de tiempo ISO.
     this.auditLog = make('AuditLog', string('pk'), string('sk'));
+    // Añadir un GSI a una tabla existente es una actualización permitida de CloudFormation (un
+    // GSI por actualización; la tabla se rellena en segundo plano). No toca el resto de tablas.
+    // Proyección INCLUDE solo con `userId` y `accion`: nunca `antes`/`despues` (pueden traer PII).
+    this.auditLog.addGlobalSecondaryIndex({
+      indexName: AUDIT_SCOPE_INDEX,
+      partitionKey: string('scope'),
+      sortKey: string('sk'),
+      projectionType: ProjectionType.INCLUDE,
+      nonKeyAttributes: ['userId', 'accion'],
+    });
     this.publications = make('Publications', string('version'));
     this.counters = make('Counters', string('name'));
+    // Tarifas de flete: una fila por versión inmutable (`t0001`...) y una fila puntero `ACTIVE`
+    // (versión activa + última creada). La «activa única» es atómica: ver services/api/src/admin-freight.
+    this.freightConfig = make('FreightConfig', string('version'));
   }
 }

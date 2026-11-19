@@ -1,0 +1,72 @@
+{
+  "version": "v1",
+  "ejemplo": true,
+  "origen": {
+    "lat": 19.1,
+    "lng": -97.62,
+    "nombre": "Patio de ejemplo, San Salvador el Seco, Puebla"
+  },
+  "camiones": [
+    {
+      "id": "camioneta",
+      "nombre": "Camioneta 3.5 t",
+      "capacidadKg": 3500,
+      "base": 800,
+      "porKm": 12,
+      "minimo": 1500
+    },
+    {
+      "id": "torton",
+      "nombre": "Torton 12 t",
+      "capacidadKg": 12000,
+      "base": 2000,
+      "porKm": 22,
+      "minimo": 3500
+    },
+    {
+      "id": "trailer",
+      "nombre": "Tráiler 25 t",
+      "capacidadKg": 25000,
+      "base": 3500,
+      "porKm": 30,
+      "minimo": 6000
+    }
+  ],
+  "margenRango": 0.1,
+  "recargoDescarga": 500,
+  "mermaPct": 5,
+  "idaYVuelta": false,
+  "zonasCubiertas": [
+    "72",
+    "73",
+    "74",
+    "75",
+    "90",
+    "91",
+    "92",
+    "93",
+    "94",
+    "95",
+    "96",
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16"
+  ],
+  "maxKm": 350,
+  "creadaPor": "seed (ejemplo)",
+  "creadaAt": "2026-11-19T12:00:00.000Z",
+  "resumenCambio": "Tarifas de ejemplo, no reales"
+}

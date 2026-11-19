@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { MEDIA_ENTITIES } from '@canteras/shared';
+import { MEDIA_ENTITIES, SETTINGS_ROW_KEYS } from '@canteras/shared';
 
 import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, Token, type StackProps } from 'aws-cdk-lib';
 import {
@@ -23,6 +23,7 @@ import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { type Construct } from 'constructs';
 
 import { FLOCI_API_PORT, FLOCI_IP, type DeployEnv } from './config.js';
+import { AUDIT_SCOPE_INDEX } from './data-stack.js';
 import { validateAllowedOrigins } from './origins.js';
 
 // Se reexporta desde su módulo compartido (también lo usa MediaStack).
@@ -42,6 +43,8 @@ export interface ApiTables {
   readonly services: TableRef;
   readonly settings: TableRef;
   readonly auditLog: TableRef;
+  readonly publications: TableRef;
+  readonly freightConfig: TableRef;
 }
 
 /** Bucket de media reducido a lo que usa esta pila (nombre y ARN). */
@@ -54,6 +57,17 @@ export interface ApiStackProps extends StackProps {
   readonly tables: ApiTables;
   /** Bucket privado de fotos (MediaStack): la Lambda de media solo puede escribir en él. */
   readonly mediaBucket: BucketRef;
+  /**
+   * Bucket privado y versionado del catálogo publicado (PublishStack): la Lambda de publicación
+   * solo puede leer y escribir bajo `published/*`.
+   */
+  readonly publishBucket: BucketRef;
+  /**
+   * Id de la distribución de CloudFront del sitio público (salida `DistributionId` de SiteStack).
+   * Opcional: sin él no se invalida nada y la Lambda no recibe permisos de CloudFront. Llega por
+   * prop (no se importa SiteStack: evita una dependencia ApiStack -> SiteStack).
+   */
+  readonly siteDistributionId?: string;
   /** Orígenes CORS permitidos. Obligatorio en prod; en dev por defecto el dashboard local. */
   readonly allowedOrigins?: string[];
 }
@@ -99,10 +113,21 @@ export class ApiStack extends Stack {
   public readonly adminCatalogFunction: IFunction;
   public readonly adminMediaFunction: IFunction;
   public readonly adminSettingsFunction: IFunction;
+  public readonly adminPublishFunction: IFunction;
+  public readonly adminFreightFunction: IFunction;
 
   public constructor(scope: Construct, id: string, props: ApiStackProps) {
-    const { deploy, userPool, userPoolClient, tables, mediaBucket, allowedOrigins, ...stackProps } =
-      props;
+    const {
+      deploy,
+      userPool,
+      userPoolClient,
+      tables,
+      mediaBucket,
+      publishBucket,
+      siteDistributionId,
+      allowedOrigins,
+      ...stackProps
+    } = props;
     super(scope, id, stackProps);
 
     const isProd = deploy.name === 'prod';
@@ -281,6 +306,144 @@ export class ApiStack extends Stack {
       }),
     );
 
+    // Publicar el catálogo (`catalog.json`) y revertir. Lee las 4 entidades y SOLO la fila PUBLIC
+    // de Settings (la MAIL, con las plantillas de correo, queda fuera por condición de IAM);
+    // Publications se lee y se escribe (PutItem solo dentro de una transacción); AuditLog solo
+    // recibe PutItem en transacción y se consulta ÚNICAMENTE por el GSI disperso (sin leer
+    // `antes`/`despues`). S3 solo bajo `published/*`. No toca Counters (la versión sale de la
+    // fila CURRENT). Floci NO aplica IAM: verificar en AWS real.
+    // Se empaqueta TODO el SDK (versiones fijadas): ni el cliente de CloudFront ni las escrituras
+    // condicionales de S3 (`If-None-Match`) deben depender de la versión del SDK del runtime.
+    const adminPublish = makeFunction('AdminPublish', 'admin-publish', []);
+    this.adminPublishFunction = adminPublish;
+    adminPublish.addEnvironment('STONES_TABLE', tables.stones.tableName);
+    adminPublish.addEnvironment('PROJECTS_TABLE', tables.projects.tableName);
+    adminPublish.addEnvironment('FINISHES_TABLE', tables.finishes.tableName);
+    adminPublish.addEnvironment('SERVICES_TABLE', tables.services.tableName);
+    adminPublish.addEnvironment('SETTINGS_TABLE', tables.settings.tableName);
+    adminPublish.addEnvironment('PUBLICATIONS_TABLE', tables.publications.tableName);
+    adminPublish.addEnvironment('AUDIT_TABLE', tables.auditLog.tableName);
+    adminPublish.addEnvironment('AUDIT_SCOPE_INDEX', AUDIT_SCOPE_INDEX);
+    adminPublish.addEnvironment('PUBLISH_BUCKET', publishBucket.bucketName);
+    if (siteDistributionId !== undefined && siteDistributionId !== '') {
+      adminPublish.addEnvironment('SITE_DISTRIBUTION_ID', siteDistributionId);
+    }
+    adminPublish.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:Scan'],
+        resources: entidades.map((t) => t.tableArn),
+      }),
+    );
+    adminPublish.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [tables.settings.tableArn],
+        // Solo la fila PUBLIC: la MAIL (plantillas) nunca se publica.
+        conditions: {
+          'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': [SETTINGS_ROW_KEYS.public] },
+        },
+      }),
+    );
+    adminPublish.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem'],
+        resources: [tables.publications.tableArn],
+      }),
+    );
+    adminPublish.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.publications.tableArn],
+        conditions: soloEnTransaccion,
+      }),
+    );
+    adminPublish.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.auditLog.tableArn],
+        conditions: soloEnTransaccion,
+      }),
+    );
+    adminPublish.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:Query'],
+        resources: [`${tables.auditLog.tableArn}/index/${AUDIT_SCOPE_INDEX}`],
+      }),
+    );
+    adminPublish.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['s3:GetObject', 's3:PutObject'],
+        resources: [`${publishBucket.bucketArn}/published/*`],
+      }),
+    );
+    if (siteDistributionId !== undefined && siteDistributionId !== '') {
+      adminPublish.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ['cloudfront:CreateInvalidation'],
+          // Solo ESA distribución (CloudFront es global: sin región).
+          resources: [
+            this.formatArn({
+              service: 'cloudfront',
+              region: '',
+              resource: 'distribution',
+              resourceName: siteDistributionId,
+            }),
+          ],
+        }),
+      );
+    }
+
+    // Tarifas de flete (versiones `tNNNN` + fila puntero ACTIVE) y simulador. FreightConfig se lee
+    // con GetItem/BatchGetItem (sin Scan ni Query: las versiones son consecutivas y se piden por
+    // clave) y se escribe con PutItem SOLO dentro de una transacción (versión + puntero +
+    // auditoría; o puntero + auditoría al activar). Stones: solo lectura por clave (el simulador
+    // calcula el peso en el servidor con los datos del catálogo). AuditLog: PutItem en
+    // transacción. Sin S3, sin Counters, sin las demás tablas. Floci NO aplica IAM: verificar en
+    // AWS real.
+    const adminFreight = makeFunction('AdminFreight', 'admin-freight');
+    this.adminFreightFunction = adminFreight;
+    adminFreight.addEnvironment('FREIGHT_CONFIG_TABLE', tables.freightConfig.tableName);
+    adminFreight.addEnvironment('STONES_TABLE', tables.stones.tableName);
+    adminFreight.addEnvironment('AUDIT_TABLE', tables.auditLog.tableName);
+    adminFreight.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem'],
+        resources: [tables.freightConfig.tableArn],
+      }),
+    );
+    adminFreight.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.freightConfig.tableArn],
+        conditions: soloEnTransaccion,
+      }),
+    );
+    adminFreight.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:BatchGetItem'],
+        resources: [tables.stones.tableArn],
+      }),
+    );
+    adminFreight.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.auditLog.tableArn],
+        conditions: soloEnTransaccion,
+      }),
+    );
+
     // ÚNICA ruta pública, marcada explícitamente.
     this.httpApi.addRoutes({
       path: '/health',
@@ -300,6 +463,10 @@ export class ApiStack extends Stack {
     addAdminResource('me', this.adminMeFunction);
     addAdminResource('media', adminMedia);
     addAdminResource('settings', adminSettings);
+    addAdminResource('publish', adminPublish);
+    addAdminResource('publications', adminPublish);
+    addAdminResource('freight-config', adminFreight);
+    addAdminResource('freight', adminFreight);
     for (const resource of ['stones', 'projects', 'finishes', 'services']) {
       addAdminResource(resource, adminCatalog);
     }

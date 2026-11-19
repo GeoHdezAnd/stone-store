@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { CatalogApi } from '../api/catalogApi';
 import { ApiError, describeError } from '../api/errors';
 import { EntityForm } from '../components/EntityForm';
-import { flattenSections, visibleFieldNames } from '../components/fieldTypes';
+import { errorAliases, flattenSections, visibleFieldNames } from '../components/fieldTypes';
 import { useIsMounted } from '../hooks/useIsMounted';
 import { useToastedAction } from '../hooks/useToastedAction';
 import { usePermissions } from '../hooks/usePermissions';
@@ -36,13 +36,7 @@ export function CatalogForm<T extends CatalogEntity>({
   const { canChangeActive } = usePermissions();
   const base = useMemo<T>(() => editing ?? config.emptyEntity(), [editing, config]);
   const allFields = useMemo(() => flattenSections(config.sections), [config.sections]);
-  const aliases = useMemo(
-    () =>
-      Object.fromEntries(
-        allFields.flatMap((f) => (f.group ? [[`${f.group.key}.${f.group.prop}`, f.name]] : [])),
-      ) as Record<string, string>,
-    [allFields],
-  );
+  const aliases = useMemo(() => errorAliases(allFields), [allFields]);
   const [values, setValues] = useState<Draft>(() =>
     toDraft(base, allFields, { blankNumbers: editing === null }),
   );

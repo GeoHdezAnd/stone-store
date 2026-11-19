@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { describeError } from '../api/errors';
 import { CheckboxGroup } from '../components/CheckboxGroup';
+import { asStringList } from '../components/fieldTypes';
 import type { FieldRenderProps } from '../components/fieldTypes';
-import { useCatalogApi } from '../hooks/useCatalogApi';
-import { usePagedList } from '../hooks/usePagedList';
+import { useAllItems } from '../hooks/useAllItems';
 
 interface Row {
   id: string;
@@ -23,15 +23,8 @@ export function ReferenceMultiSelect({
   labelOf: (row: Row & Record<string, unknown>) => string;
   props: FieldRenderProps;
 }) {
-  const api = useCatalogApi<Row & Record<string, unknown>>(segment);
-  const list = usePagedList(api.list);
-  const selected = Array.isArray(props.value) ? props.value : [];
-
-  // Trae todas las páginas (los selects necesitan todas las opciones).
-  const { status, hasMore, loadingMore, loadMore, error } = list;
-  useEffect(() => {
-    if (status === 'ready' && hasMore && !loadingMore && !error) void loadMore();
-  }, [status, hasMore, loadingMore, loadMore, error]);
+  const list = useAllItems<Row & Record<string, unknown>>(segment);
+  const selected = asStringList(props.value);
 
   const options = useMemo(() => {
     const known = list.items.map((row) => ({
@@ -45,7 +38,7 @@ export function ReferenceMultiSelect({
     return [...known, ...missing];
   }, [list.items, selected, labelOf]);
 
-  if (list.status === 'error' || list.error) {
+  if (list.status === 'error') {
     return (
       <IdsTextarea
         id={props.inputId}
@@ -57,7 +50,7 @@ export function ReferenceMultiSelect({
       />
     );
   }
-  if (list.status === 'loading' || list.hasMore) {
+  if (list.status === 'loading') {
     return (
       <p className="muted" role="status">
         Cargando opciones…

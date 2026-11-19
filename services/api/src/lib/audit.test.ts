@@ -67,4 +67,16 @@ describe('buildAuditEntry', () => {
     const big = { blob: 'x'.repeat(310_000) };
     expect(() => buildAuditEntry({ ...base, after: big })).toThrow(/KB/);
   });
+
+  it('sin scope no agrega el atributo (el ítem no entra al índice disperso)', () => {
+    expect('scope' in buildAuditEntry(base)).toBe(false);
+  });
+
+  it('con scope CATALOG lo agrega (entra al índice de cambios pendientes)', () => {
+    expect(buildAuditEntry({ ...base, scope: 'CATALOG' }).scope).toBe('CATALOG');
+  });
+
+  it('rechaza un scope desconocido', () => {
+    expect(() => buildAuditEntry({ ...base, scope: 'OTRO' as 'CATALOG' })).toThrow(/scope/);
+  });
 });

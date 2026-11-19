@@ -107,6 +107,8 @@ export function createCatalogRoutes(
         after,
         at: now(),
         requestId: ctx.requestId,
+        // Todo el catálogo entra a catalog.json: alimenta los «cambios pendientes» de Publicar.
+        scope: 'CATALOG',
       });
 
     const logWrite = (ctx: HandlerContext, id: string, action: AuditAction) =>

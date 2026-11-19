@@ -3,7 +3,9 @@ import type { FormEvent, ReactNode } from 'react';
 import type { FieldErrors } from '../lib/formErrors';
 import { CheckboxGroup } from './CheckboxGroup';
 import { FieldControl } from './FieldControl';
+import { asRows, asStringList } from './fieldTypes';
 import type { Draft, FieldDef, FormSection, FormValue } from './fieldTypes';
+import { RowsField } from './RowsField';
 
 export type { FieldDef, FormSection } from './fieldTypes';
 
@@ -59,7 +61,8 @@ export function EntityForm<T>({
       [error ? `${id}-error` : null, hint ? `${id}-hint` : null].filter(Boolean).join(' ') ||
       undefined;
     const disabled = Boolean(field.disabled) || busy;
-    const grouped = field.kind === 'multiselect' || field.kind === 'custom';
+    const grouped =
+      field.kind === 'multiselect' || field.kind === 'custom' || field.kind === 'rows';
     const value = values[field.name] ?? '';
     const set = (v: FormValue) => onChange(field.name, v);
     return (
@@ -84,9 +87,20 @@ export function EntityForm<T>({
             {field.kind === 'multiselect' ? (
               <CheckboxGroup
                 options={field.options ?? []}
-                value={Array.isArray(value) ? value : []}
+                value={asStringList(value)}
                 onChange={set}
                 disabled={disabled}
+              />
+            ) : field.kind === 'rows' ? (
+              <RowsField
+                rows={asRows(value)}
+                rowFields={field.rowFields ?? []}
+                onChange={set}
+                disabled={disabled}
+                rowLabel={field.rowLabel ?? 'Fila'}
+                addLabel={field.addRowLabel ?? 'Agregar fila'}
+                maxRows={field.maxRows}
+                idPrefix={id}
               />
             ) : (
               field.render?.({
@@ -173,5 +187,5 @@ export function EntityForm<T>({
 /** Por defecto ocupan todo el ancho los campos largos (áreas, listas, grupos y controles propios). */
 function isFull<T>(field: FieldDef<T>): boolean {
   if (field.span) return field.span === 'full';
-  return ['textarea', 'list', 'multiselect', 'custom'].includes(field.kind);
+  return ['textarea', 'list', 'multiselect', 'custom', 'rows'].includes(field.kind);
 }

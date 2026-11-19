@@ -12,9 +12,10 @@ import { describe, expect, it } from 'vitest';
 import { ApiStack, jwtIssuer, validateAllowedOrigins } from './api-stack.js';
 import { AuthStack } from './auth-stack.js';
 import { FLOCI_API_PORT, FLOCI_IP } from './config.js';
-import { DataStack } from './data-stack.js';
+import { AUDIT_SCOPE_INDEX, DataStack } from './data-stack.js';
 import { MEDIA_ENTITIES } from '@canteras/shared';
 import { MediaStack } from './media-stack.js';
+import { PublishStack } from './publish-stack.js';
 
 const REPO = join(import.meta.dirname, '..', '..');
 
@@ -22,6 +23,7 @@ interface BuildOptions {
   name?: 'dev' | 'prod';
   emulated?: boolean;
   allowedOrigins?: string[];
+  siteDistributionId?: string;
 }
 
 function build(opts: BuildOptions = {}): {
@@ -29,8 +31,9 @@ function build(opts: BuildOptions = {}): {
   auth: AuthStack;
   data: DataStack;
   media: MediaStack;
+  publish: PublishStack;
 } {
-  const { name = 'dev', emulated = false, allowedOrigins } = opts;
+  const { name = 'dev', emulated = false, allowedOrigins, siteDistributionId } = opts;
   // Se omite el bundling con esbuild para que la síntesis sea rápida; el synth real de
   // `cdk synth` sí empaqueta.
   const app = new App({ context: { 'aws:cdk:bundling-stacks': [] } });
@@ -41,11 +44,13 @@ function build(opts: BuildOptions = {}): {
     deploy,
     allowedOrigins: validateAllowedOrigins(deploy, allowedOrigins),
   });
+  const publish = new PublishStack(app, 'Publish', { deploy });
   const stack = new ApiStack(app, 'Api', {
     deploy,
     userPool: auth.userPool,
     userPoolClient: auth.userPoolClient,
     mediaBucket: media.bucket,
+    publishBucket: publish.bucket,
     tables: {
       stones: data.stones,
       projects: data.projects,
@@ -53,12 +58,15 @@ function build(opts: BuildOptions = {}): {
       services: data.services,
       settings: data.settings,
       auditLog: data.auditLog,
+      publications: data.publications,
+      freightConfig: data.freightConfig,
     },
     ...(allowedOrigins ? { allowedOrigins } : {}),
+    ...(siteDistributionId ? { siteDistributionId } : {}),
   });
   Tags.of(app).add('Project', 'canteras-naturales');
   Tags.of(app).add('Env', name);
-  return { stack, auth, data, media };
+  return { stack, auth, data, media, publish };
 }
 const synth = (opts: BuildOptions = {}): Template => Template.fromStack(build(opts).stack);
 
@@ -118,12 +126,20 @@ describe('ApiStack: invariante de seguridad de las rutas', () => {
       [
         'ANY /admin/finishes',
         'ANY /admin/finishes/{proxy+}',
+        'ANY /admin/freight',
+        'ANY /admin/freight-config',
+        'ANY /admin/freight-config/{proxy+}',
+        'ANY /admin/freight/{proxy+}',
         'ANY /admin/me',
         'ANY /admin/me/{proxy+}',
         'ANY /admin/media',
         'ANY /admin/media/{proxy+}',
         'ANY /admin/projects',
         'ANY /admin/projects/{proxy+}',
+        'ANY /admin/publications',
+        'ANY /admin/publications/{proxy+}',
+        'ANY /admin/publish',
+        'ANY /admin/publish/{proxy+}',
         'ANY /admin/services',
         'ANY /admin/services/{proxy+}',
         'ANY /admin/settings',
@@ -346,14 +362,16 @@ describe('ApiStack: Lambdas', () => {
       'services/api/src/admin-catalog/handler.ts',
       'services/api/src/admin-media/handler.ts',
       'services/api/src/admin-settings/handler.ts',
+      'services/api/src/admin-publish/handler.ts',
+      'services/api/src/admin-freight/handler.ts',
     ]) {
       expect(existsSync(join(REPO, p)), p).toBe(true);
     }
   });
 
-  it('hay 5 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
+  it('hay 7 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Lambda::Function', 5);
+    t.resourceCountIs('AWS::Lambda::Function', 7);
     t.allResourcesProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
       MemorySize: 256,
@@ -364,7 +382,7 @@ describe('ApiStack: Lambdas', () => {
 
   it('cada función tiene su log group con retención de 1 semana (sin logRetention)', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Logs::LogGroup', 5);
+    t.resourceCountIs('AWS::Logs::LogGroup', 7);
     t.allResourcesProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
     t.allResourcesProperties('AWS::Lambda::Function', {
       LoggingConfig: { LogGroup: { Ref: Match.stringLikeRegexp('Logs') } },
@@ -410,6 +428,14 @@ describe('ApiStack: Lambdas', () => {
       'ANY /admin/media/{proxy+}': /AdminMedia/,
       'ANY /admin/settings': /AdminSettings/,
       'ANY /admin/settings/{proxy+}': /AdminSettings/,
+      'ANY /admin/publish': /AdminPublish/,
+      'ANY /admin/publish/{proxy+}': /AdminPublish/,
+      'ANY /admin/publications': /AdminPublish/,
+      'ANY /admin/publications/{proxy+}': /AdminPublish/,
+      'ANY /admin/freight-config': /AdminFreight/,
+      'ANY /admin/freight-config/{proxy+}': /AdminFreight/,
+      'ANY /admin/freight': /AdminFreight/,
+      'ANY /admin/freight/{proxy+}': /AdminFreight/,
       ...Object.fromEntries(
         RECURSOS_CATALOGO.flatMap((x) => [
           [`ANY /admin/${x}`, /AdminCatalog/],
@@ -791,11 +817,13 @@ describe('ApiStack: Lambda AdminMedia', () => {
       deploy,
       allowedOrigins: ['http://localhost:5173'],
     });
+    const publish = new PublishStack(app, 'Publish', { deploy });
     new ApiStack(app, 'Api', {
       deploy,
       userPool: auth.userPool,
       userPoolClient: auth.userPoolClient,
       mediaBucket: media.bucket,
+      publishBucket: publish.bucket,
       tables: {
         stones: data.stones,
         projects: data.projects,
@@ -803,6 +831,8 @@ describe('ApiStack: Lambda AdminMedia', () => {
         services: data.services,
         settings: data.settings,
         auditLog: data.auditLog,
+        publications: data.publications,
+        freightConfig: data.freightConfig,
       },
     });
     const dir = app.synth().directory;
@@ -967,11 +997,13 @@ describe('ApiStack: Lambda AdminSettings', () => {
       deploy,
       allowedOrigins: ['http://localhost:5173'],
     });
+    const publish = new PublishStack(app, 'Publish', { deploy });
     new ApiStack(app, 'Api', {
       deploy,
       userPool: auth.userPool,
       userPoolClient: auth.userPoolClient,
       mediaBucket: media.bucket,
+      publishBucket: publish.bucket,
       tables: {
         stones: data.stones,
         projects: data.projects,
@@ -979,6 +1011,8 @@ describe('ApiStack: Lambda AdminSettings', () => {
         services: data.services,
         settings: data.settings,
         auditLog: data.auditLog,
+        publications: data.publications,
+        freightConfig: data.freightConfig,
       },
     });
     const dir = app.synth().directory;
@@ -993,6 +1027,258 @@ describe('ApiStack: Lambda AdminSettings', () => {
     for (const e of externos) expect(e, `require externo ${e}`).toMatch(/^@aws-sdk\/|^node:/);
     expect(bundle).not.toContain('@canteras/shared');
   }, 60_000);
+});
+
+describe('ApiStack: Lambda AdminPublish', () => {
+  const RUTAS = [
+    'ANY /admin/publish',
+    'ANY /admin/publish/{proxy+}',
+    'ANY /admin/publications',
+    'ANY /admin/publications/{proxy+}',
+  ];
+  const ARN_INDICE = `/index/${AUDIT_SCOPE_INDEX}`;
+
+  it('las 4 rutas de publicación integran la Lambda AdminPublish y todas son JWT', () => {
+    const t = synth();
+    const fn = idFuncion(t, 'AdminPublish');
+    const integraciones = t.findResources('AWS::ApiGatewayV2::Integration');
+    const vistas: string[] = [];
+    for (const r of rutas(t)) {
+      const key = r['RouteKey'] as string;
+      if (!key.startsWith('ANY /admin/publi')) continue;
+      expect(r['AuthorizationType'], key).toBe('JWT');
+      expect(r['AuthorizerId'], key).toBeDefined();
+      const target = JSON.stringify(r['Target']);
+      const idInt = Object.keys(integraciones).find((id) => target.includes(`"${id}"`))!;
+      expect(JSON.stringify(integraciones[idInt]!.Properties.IntegrationUri), key).toContain(
+        `"${fn}"`,
+      );
+      vistas.push(key);
+    }
+    expect(vistas.sort()).toEqual([...RUTAS].sort());
+  });
+
+  it('la invariante de seguridad sigue verde con las rutas nuevas (solo GET /health es pública)', () => {
+    for (const emulated of [false, true]) {
+      expect(problemasDeSeguridad(synth({ emulated }))).toEqual([]);
+    }
+  });
+
+  it('el entorno referencia las tablas y el bucket (no literales); SITE_DISTRIBUTION_ID solo si se pasa', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminPublish')]!;
+    const vars = fn.Properties.Environment.Variables as Record<string, Json>;
+    expect(Object.keys(vars).sort()).toEqual(
+      [
+        'AUDIT_SCOPE_INDEX',
+        'AUDIT_TABLE',
+        'FINISHES_TABLE',
+        'PROJECTS_TABLE',
+        'PUBLICATIONS_TABLE',
+        'PUBLISH_BUCKET',
+        'SERVICES_TABLE',
+        'SETTINGS_TABLE',
+        'STONES_TABLE',
+      ].sort(),
+    );
+    expect(vars['AUDIT_SCOPE_INDEX']).toBe(AUDIT_SCOPE_INDEX);
+    const esperado: Record<string, unknown> = {
+      STONES_TABLE: data.stones,
+      PROJECTS_TABLE: data.projects,
+      FINISHES_TABLE: data.finishes,
+      SERVICES_TABLE: data.services,
+      SETTINGS_TABLE: data.settings,
+      PUBLICATIONS_TABLE: data.publications,
+      AUDIT_TABLE: data.auditLog,
+    };
+    for (const [nombre, tabla] of Object.entries(esperado)) {
+      const idEsperado = data.getLogicalId((tabla as Table).node.defaultChild as CfnTable);
+      expect(typeof vars[nombre], nombre).toBe('object');
+      expect(tablaDeImport(dt, vars[nombre]!), nombre).toBe(idEsperado);
+    }
+    expect(typeof vars['PUBLISH_BUCKET']).toBe('object');
+
+    const conSitio = synth({ siteDistributionId: 'E1ABCDEF' });
+    const v2 = conSitio.findResources('AWS::Lambda::Function')[idFuncion(conSitio, 'AdminPublish')]!
+      .Properties.Environment.Variables as Record<string, unknown>;
+    expect(v2['SITE_DISTRIBUTION_ID']).toBe('E1ABCDEF');
+  });
+
+  it('PUBLISH_BUCKET apunta al bucket de PublishStack (no al de media)', () => {
+    const { stack, publish } = build();
+    const t = Template.fromStack(stack);
+    const pt = Template.fromStack(publish);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminPublish')]!;
+    const nombre = fn.Properties.Environment.Variables['PUBLISH_BUCKET'][
+      'Fn::ImportValue'
+    ] as string;
+    const outputs = pt.toJSON().Outputs as Record<
+      string,
+      { Value: Json; Export?: { Name: string } }
+    >;
+    const out = Object.values(outputs).find((o) => o.Export?.Name === nombre);
+    expect(out, 'exportación del bucket de publicación').toBeDefined();
+    expect(out!.Value['Ref']).toBe(publish.getLogicalId(publish.bucket.node.defaultChild as never));
+  });
+
+  /** Sentencias de DynamoDB agrupadas por tabla de DataStack. */
+  function dynamoPorTabla(sitio?: string) {
+    const { stack, data } = build(sitio ? { siteDistributionId: sitio } : {});
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const porId = new Map<string, Json[]>();
+    const sobreIndice: Json[] = [];
+    for (const s of sentenciasDe(t, 'AdminPublish')) {
+      if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
+      const recursos = lista(s['Resource']);
+      if (recursos.some((r) => JSON.stringify(r).includes(ARN_INDICE))) {
+        sobreIndice.push(s);
+        continue;
+      }
+      const ids = tablasDeSentencia(dt, s);
+      expect(ids, 'una sola tabla por sentencia (salvo las 4 entidades)').not.toHaveLength(0);
+      for (const id of ids) porId.set(id, [...(porId.get(id) ?? []), s]);
+    }
+    const idDe = (tb: Table): string => data.getLogicalId(tb.node.defaultChild as CfnTable);
+    return { t, data, porId, sobreIndice, idDe, stack };
+  }
+
+  it('IAM DynamoDB EXACTA: Scan en las 4 entidades; GetItem de Settings solo la clave PUBLIC', () => {
+    const { data, porId, idDe } = dynamoPorTabla();
+    for (const tb of [data.stones, data.projects, data.finishes, data.services]) {
+      const ss = porId.get(idDe(tb))!;
+      expect(ss, 'entidad').toHaveLength(1);
+      expect(lista(ss[0]!['Action'])).toEqual(['dynamodb:Scan']);
+      expect(ss[0]!['Condition']).toBeUndefined();
+    }
+    const settings = porId.get(idDe(data.settings))!;
+    expect(settings).toHaveLength(1);
+    expect(lista(settings[0]!['Action'])).toEqual(['dynamodb:GetItem']);
+    // La fila MAIL (plantillas de correo) NO se puede leer con este rol.
+    expect(settings[0]!['Condition']).toEqual({
+      'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC'] },
+    });
+  });
+
+  it('IAM DynamoDB EXACTA: Publications lee con GetItem/BatchGetItem y escribe PutItem solo en transacción', () => {
+    const { data, porId, idDe } = dynamoPorTabla();
+    const ss = porId.get(idDe(data.publications))!;
+    expect(ss).toHaveLength(2);
+    const lectura = ss.find((s) => s['Condition'] === undefined)!;
+    const escritura = ss.find((s) => s['Condition'] !== undefined)!;
+    expect((lista(lectura['Action']) as string[]).sort()).toEqual([
+      'dynamodb:BatchGetItem',
+      'dynamodb:GetItem',
+    ]);
+    expect(lista(escritura['Action'])).toEqual(['dynamodb:PutItem']);
+    expect(escritura['Condition']).toEqual(CONDICION_TRANSACCION);
+  });
+
+  it('IAM DynamoDB EXACTA: AuditLog solo PutItem en transacción; el índice solo Query', () => {
+    const { data, porId, idDe, sobreIndice } = dynamoPorTabla();
+    const audit = porId.get(idDe(data.auditLog))!;
+    expect(audit).toHaveLength(1);
+    expect(lista(audit[0]!['Action'])).toEqual(['dynamodb:PutItem']);
+    expect(audit[0]!['Condition']).toEqual(CONDICION_TRANSACCION);
+    // Query solo sobre el GSI disperso (no sobre la tabla base): sin lectura de antes/después.
+    expect(sobreIndice).toHaveLength(1);
+    expect(lista(sobreIndice[0]!['Action'])).toEqual(['dynamodb:Query']);
+    expect(lista(sobreIndice[0]!['Resource'])).toHaveLength(1);
+    expect(sobreIndice[0]!['Condition']).toBeUndefined();
+  });
+
+  it('IAM DynamoDB: ninguna otra tabla (ni Counters) y ninguna acción de más', () => {
+    const { data, porId, idDe } = dynamoPorTabla();
+    const permitidas = [
+      data.stones,
+      data.projects,
+      data.finishes,
+      data.services,
+      data.settings,
+      data.publications,
+      data.auditLog,
+    ].map(idDe);
+    expect([...porId.keys()].sort()).toEqual([...permitidas].sort());
+    expect(porId.has(idDe(data.counters))).toBe(false);
+    for (const ss of porId.values()) {
+      for (const s of ss) {
+        expect(s['Effect']).toBe('Allow');
+        for (const a of lista(s['Action']) as string[]) {
+          expect(a).not.toContain('*');
+          expect(a).not.toMatch(/DeleteItem|UpdateItem|BatchWriteItem|TransactWriteItems|Query$/);
+        }
+      }
+    }
+  });
+
+  it('IAM S3: solo GetObject y PutObject bajo published/* del bucket de publicación; sin listado ni borrado', () => {
+    const { t } = dynamoPorTabla();
+    const s3 = sentenciasDe(t, 'AdminPublish').filter((s) =>
+      lista(s['Action']).some((a) => String(a).startsWith('s3:')),
+    );
+    expect(s3).toHaveLength(1);
+    expect((lista(s3[0]!['Action']) as string[]).sort()).toEqual(['s3:GetObject', 's3:PutObject']);
+    const recursos = lista(s3[0]!['Resource']);
+    expect(recursos).toHaveLength(1);
+    const texto = JSON.stringify(recursos[0]);
+    expect(texto).toContain('/published/*');
+    expect(texto).not.toBe('"*"');
+    // Sin acceso al prefijo de fotos ni a la raíz del bucket.
+    expect(texto).not.toMatch(/stones|projects|finishes/);
+    expect(JSON.stringify(s3)).not.toMatch(/s3:(List|Delete)|s3:\*/);
+  });
+
+  it('IAM: sin CloudFront cuando no hay distribución; con ella, CreateInvalidation sobre ESA distribución', () => {
+    const sin = dynamoPorTabla();
+    expect(JSON.stringify(sentenciasDe(sin.t, 'AdminPublish'))).not.toContain('cloudfront:');
+
+    const con = dynamoPorTabla('E1ABCDEF');
+    const cf = sentenciasDe(con.t, 'AdminPublish').filter((s) =>
+      lista(s['Action']).some((a) => String(a).startsWith('cloudfront:')),
+    );
+    expect(cf).toHaveLength(1);
+    expect(lista(cf[0]!['Action'])).toEqual(['cloudfront:CreateInvalidation']);
+    const recurso = JSON.stringify(cf[0]!['Resource']);
+    expect(recurso).toContain('distribution/E1ABCDEF');
+    expect(recurso).not.toContain('distribution/*');
+  });
+
+  it('IAM: fuera de DynamoDB, S3 y CloudFront solo logs; sin comodines', () => {
+    const { t } = dynamoPorTabla('E1ABCDEF');
+    for (const s of sentenciasDe(t, 'AdminPublish')) {
+      expect(JSON.stringify(s['Action'])).not.toContain('*');
+      expect(JSON.stringify(s['Resource'])).not.toBe('"*"');
+      const acciones = lista(s['Action']) as string[];
+      if (!acciones.some((a) => /^(dynamodb|s3|cloudfront):/.test(a))) {
+        for (const a of acciones) expect(a).toMatch(/^logs:|^xray:/);
+      }
+    }
+  });
+
+  it('las otras Lambdas NO ganan permisos sobre Publications, el bucket de publicación ni CloudFront', () => {
+    const { stack, data } = build({ siteDistributionId: 'E1ABCDEF' });
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const pub = data.getLogicalId(data.publications.node.defaultChild as CfnTable);
+    for (const f of ['Health', 'AdminMe', 'AdminCatalog', 'AdminMedia', 'AdminSettings']) {
+      const ss = sentenciasDe(t, f);
+      expect(JSON.stringify(ss), f).not.toContain('cloudfront:');
+      expect(JSON.stringify(ss), f).not.toContain('/published/');
+      for (const s of ss) {
+        if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
+        if (JSON.stringify(s['Resource']).includes(ARN_INDICE))
+          throw new Error(`${f} lee el índice`);
+        expect(tablasDeSentencia(dt, s), f).not.toContain(pub);
+      }
+      const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, f)]!;
+      const vars = Object.keys(fn.Properties.Environment?.Variables ?? {});
+      for (const v of ['PUBLISH_BUCKET', 'PUBLICATIONS_TABLE', 'SITE_DISTRIBUTION_ID']) {
+        expect(vars, `${f} ${v}`).not.toContain(v);
+      }
+    }
+  });
 });
 
 describe('ApiStack: throttling por ruta de media', () => {
@@ -1018,5 +1304,160 @@ describe('ApiStack: throttling por ruta de media', () => {
       .sort();
     expect(reales).toHaveLength(2);
     expect(Object.keys(stage.Properties.RouteSettings).sort()).toEqual(reales);
+  });
+});
+
+describe('ApiStack: Lambda AdminFreight', () => {
+  const RUTAS = [
+    'ANY /admin/freight-config',
+    'ANY /admin/freight-config/{proxy+}',
+    'ANY /admin/freight',
+    'ANY /admin/freight/{proxy+}',
+  ];
+
+  it('las 4 rutas de flete integran la Lambda AdminFreight y todas son JWT', () => {
+    const t = synth();
+    const fn = idFuncion(t, 'AdminFreight');
+    const integraciones = t.findResources('AWS::ApiGatewayV2::Integration');
+    const vistas: string[] = [];
+    for (const r of rutas(t)) {
+      const key = r['RouteKey'] as string;
+      if (!key.startsWith('ANY /admin/freight')) continue;
+      expect(r['AuthorizationType'], key).toBe('JWT');
+      expect(r['AuthorizerId'], key).toBeDefined();
+      const target = JSON.stringify(r['Target']);
+      const idInt = Object.keys(integraciones).find((id) => target.includes(`"${id}"`))!;
+      expect(JSON.stringify(integraciones[idInt]!.Properties.IntegrationUri), key).toContain(
+        `"${fn}"`,
+      );
+      vistas.push(key);
+    }
+    expect(vistas.sort()).toEqual([...RUTAS].sort());
+  });
+
+  it('la invariante de seguridad sigue verde con las rutas nuevas (solo GET /health es pública)', () => {
+    for (const emulated of [false, true]) {
+      expect(problemasDeSeguridad(synth({ emulated }))).toEqual([]);
+    }
+  });
+
+  it('el entorno referencia las 3 tablas (no literales)', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminFreight')]!;
+    const vars = fn.Properties.Environment.Variables as Record<string, Json>;
+    expect(Object.keys(vars).sort()).toEqual([
+      'AUDIT_TABLE',
+      'FREIGHT_CONFIG_TABLE',
+      'STONES_TABLE',
+    ]);
+    const esperado: Record<string, unknown> = {
+      FREIGHT_CONFIG_TABLE: data.freightConfig,
+      STONES_TABLE: data.stones,
+      AUDIT_TABLE: data.auditLog,
+    };
+    for (const [nombre, tabla] of Object.entries(esperado)) {
+      expect(tablaDeImport(dt, vars[nombre]!), nombre).toBe(
+        data.getLogicalId((tabla as { node: { defaultChild: CfnTable } }).node.defaultChild),
+      );
+    }
+  });
+
+  function dynamoPorTabla() {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const porId = new Map<string, Json[]>();
+    for (const s of sentenciasDe(t, 'AdminFreight')) {
+      if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
+      const ids = tablasDeSentencia(dt, s);
+      expect(ids, 'una sola tabla por sentencia').toHaveLength(1);
+      porId.set(ids[0]!, [...(porId.get(ids[0]!) ?? []), s]);
+    }
+    const idDe = (tb: Table): string => data.getLogicalId(tb.node.defaultChild as CfnTable);
+    return { t, data, porId, idDe };
+  }
+
+  it('IAM EXACTA: FreightConfig lee con GetItem/BatchGetItem y escribe PutItem solo en transacción', () => {
+    const { data, porId, idDe } = dynamoPorTabla();
+    const ss = porId.get(idDe(data.freightConfig))!;
+    expect(ss).toHaveLength(2);
+    const lectura = ss.find((s) => s['Condition'] === undefined)!;
+    const escritura = ss.find((s) => s['Condition'] !== undefined)!;
+    expect((lista(lectura['Action']) as string[]).sort()).toEqual([
+      'dynamodb:BatchGetItem',
+      'dynamodb:GetItem',
+    ]);
+    expect(lista(escritura['Action'])).toEqual(['dynamodb:PutItem']);
+    expect(escritura['Condition']).toEqual(CONDICION_TRANSACCION);
+  });
+
+  it('IAM EXACTA: Stones solo BatchGetItem (sin escritura, Scan ni Query)', () => {
+    const { data, porId, idDe } = dynamoPorTabla();
+    const ss = porId.get(idDe(data.stones))!;
+    expect(ss).toHaveLength(1);
+    expect(lista(ss[0]!['Action'])).toEqual(['dynamodb:BatchGetItem']);
+    expect(ss[0]!['Condition']).toBeUndefined();
+  });
+
+  it('IAM EXACTA: AuditLog solo PutItem en transacción', () => {
+    const { data, porId, idDe } = dynamoPorTabla();
+    const ss = porId.get(idDe(data.auditLog))!;
+    expect(ss).toHaveLength(1);
+    expect(lista(ss[0]!['Action'])).toEqual(['dynamodb:PutItem']);
+    expect(ss[0]!['Condition']).toEqual(CONDICION_TRANSACCION);
+  });
+
+  it('IAM: solo esas 3 tablas, sin Counters, sin comodines y sin Scan/Query/Update/Delete', () => {
+    const { t, data, porId, idDe } = dynamoPorTabla();
+    expect([...porId.keys()].sort()).toEqual(
+      [data.freightConfig, data.stones, data.auditLog].map(idDe).sort(),
+    );
+    expect(porId.has(idDe(data.counters))).toBe(false);
+    for (const s of sentenciasDe(t, 'AdminFreight')) {
+      expect(s['Effect']).toBe('Allow');
+      expect(JSON.stringify(s['Resource'])).not.toBe('"*"');
+      for (const a of lista(s['Action']) as string[]) {
+        expect(a).not.toContain('*');
+        expect(a).not.toMatch(
+          /Scan|Query|UpdateItem|DeleteItem|BatchWriteItem|TransactWriteItems|^s3:|^cloudfront:/,
+        );
+        // Fuera de DynamoDB solo logs.
+        if (!a.startsWith('dynamodb:')) expect(a).toMatch(/^logs:|^xray:/);
+      }
+    }
+  });
+
+  it('las otras Lambdas NO ganan permisos sobre FreightConfig ni reciben su variable', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const fc = data.getLogicalId(data.freightConfig.node.defaultChild as CfnTable);
+    for (const f of [
+      'Health',
+      'AdminMe',
+      'AdminCatalog',
+      'AdminMedia',
+      'AdminSettings',
+      'AdminPublish',
+    ]) {
+      for (const s of sentenciasDe(t, f)) {
+        if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
+        if (lista(s['Resource']).some((r) => JSON.stringify(r).includes('/index/'))) continue;
+        expect(tablasDeSentencia(dt, s), f).not.toContain(fc);
+      }
+      const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, f)]!;
+      expect(Object.keys(fn.Properties.Environment?.Variables ?? {}), f).not.toContain(
+        'FREIGHT_CONFIG_TABLE',
+      );
+    }
+  });
+
+  it('las rutas de flete usan el throttling de la etapa (sin límite propio por ruta)', () => {
+    const t = synth();
+    const stage = Object.values(t.findResources('AWS::ApiGatewayV2::Stage'))[0]!;
+    const keys = Object.keys(stage.Properties.RouteSettings ?? {});
+    expect(keys.some((k) => k.includes('freight'))).toBe(false);
   });
 });

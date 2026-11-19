@@ -310,6 +310,7 @@ describe('reemplazar (PUT)', () => {
       accion: 'update',
       antes: service(),
       despues: nuevo,
+      scope: 'CATALOG',
     });
   });
 
@@ -352,6 +353,7 @@ describe('baja lógica (DELETE)', () => {
       accion: 'delete',
       antes: finish(),
       despues: finish({ activa: false }),
+      scope: 'CATALOG',
     });
   });
 
@@ -501,6 +503,7 @@ describe('auditoría y logs', () => {
         accion: 'create',
         antes: null,
         despues: stone(),
+        scope: 'CATALOG',
       },
     ]);
   });

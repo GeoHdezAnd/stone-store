@@ -86,6 +86,8 @@ export const stoneSchema = z
       SOLD_BY_UNITS.length,
       'Las unidades de venta',
     ).refine((xs) => xs.length >= 1, 'Debe venderse por al menos una unidad'),
+    // AVISO: el flete (packages/shared/src/freight) IGNORA este campo y usa densidadKgM3; editarlo
+    // no cambia ningún estimado. Pendiente: quitarlo del dashboard o derivarlo (docs/siguiente-sesion.md).
     pesoKgPorM2PorCm: positiveOrNull('El peso por m² por cm'),
     pesoKgPorPieza: positiveOrNull('El peso por pieza'),
     densidadKgM3: z

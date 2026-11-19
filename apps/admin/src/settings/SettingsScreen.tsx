@@ -37,7 +37,7 @@ export function SettingsScreen() {
             title="Datos del patio"
             description="Se publican en el sitio público."
             schema={publicSettingsSchema}
-            fields={publicFields}
+            sections={[{ fields: publicFields }]}
             initial={state.data.public}
             canEdit={canEditSettings}
             onSave={(values) => api.save('public', values)}
@@ -47,7 +47,7 @@ export function SettingsScreen() {
             title="Correo de cotización"
             description="Texto del correo que recibe el cliente al enviarle la cotización."
             schema={mailSettingsSchema}
-            fields={mailFields}
+            sections={[{ fields: mailFields }]}
             initial={state.data.mail}
             canEdit={canEditSettings}
             onSave={(values) => api.save('mail', values)}

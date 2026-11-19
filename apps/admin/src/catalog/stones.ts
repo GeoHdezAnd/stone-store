@@ -7,6 +7,7 @@ import {
 } from '@canteras/shared';
 import type { Stone } from '@canteras/shared';
 import { createElement } from 'react';
+import { asStringList } from '../components/fieldTypes';
 import type { Draft, FieldDef, FormSection } from '../components/fieldTypes';
 import { MediaPhotoField } from './MediaPhotoField';
 import { ReferenceMultiSelect } from './ReferenceMultiSelect';
@@ -26,7 +27,7 @@ const projectLabel = (row: { id: string; titulo?: unknown }) =>
 
 /** Reglas del schema: «pieza» exige peso por pieza y «m2» exige espesores (y usa el peso por m²). */
 const sells = (unit: (typeof SOLD_BY_UNITS)[number]) => (values: Draft) =>
-  Array.isArray(values.vendidaPor) && values.vendidaPor.includes(unit);
+  asStringList(values.vendidaPor).includes(unit);
 
 function weightHint(values: Draft): string | undefined {
   if (!sells('m2')(values)) return undefined;

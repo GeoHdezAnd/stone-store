@@ -11,6 +11,8 @@ import { finishesConfig } from '../catalog/finishes';
 import { projectsConfig } from '../catalog/projects';
 import { servicesConfig } from '../catalog/services';
 import { stonesConfig } from '../catalog/stones';
+import { FreightScreen } from '../freight/FreightScreen';
+import { PublishScreen } from '../publish/PublishScreen';
 import { SettingsScreen } from '../settings/SettingsScreen';
 import type { AppConfig } from '../config';
 import { Layout } from './Layout';
@@ -59,6 +61,22 @@ export function AppRoutes() {
           element={
             <RequireRole roles={['owner', 'staff']}>
               <CatalogRoutes config={servicesConfig} />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="freight"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <FreightScreen />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="publish"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <PublishScreen />
             </RequireRole>
           }
         />

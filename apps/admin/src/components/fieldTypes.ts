@@ -4,7 +4,9 @@ import type { ReactNode } from 'react';
  * Lo que un formulario guarda por campo mientras se edita. Los números y las listas se manejan
  * como texto y se convierten al guardar (`lib/draft.ts`), para no perder lo que se está escribiendo.
  */
-export type FormValue = string | boolean | string[];
+/** Una fila de un campo `rows`: todo texto, igual que el resto del borrador. */
+export type FormRow = Record<string, string>;
+export type FormValue = string | boolean | string[] | FormRow[];
 export type Draft = Record<string, FormValue>;
 
 export type FieldKind =
@@ -20,6 +22,8 @@ export type FieldKind =
   | 'number-list'
   /** Varias opciones fijas (`options`). */
   | 'multiselect'
+  /** Lista dinámica de filas (`rowFields`); cada fila es un objeto. */
+  | 'rows'
   /** Control propio vía `render`; su valor es texto o lista de textos. */
   | 'custom';
 
@@ -37,6 +41,14 @@ export interface FieldRenderProps {
   mode: 'create' | 'edit';
 }
 
+/** Columna de un campo `rows`. */
+export interface RowFieldDef {
+  name: string;
+  label: string;
+  kind: 'text' | 'number';
+  hint?: string;
+}
+
 export interface FieldDef<T> {
   name: Extract<keyof T, string>;
   label: string;
@@ -49,6 +61,16 @@ export interface FieldDef<T> {
   hint?: string | ((values: Draft) => string | undefined);
   readOnly?: boolean;
   disabled?: boolean;
+  /**
+   * Para `number`/`nullable-number`: factor de presentación. Se muestra `valor × scale` y se
+   * guarda `texto ÷ scale` (p. ej. scale 100: la fracción 0.1 se edita como 10 %).
+   */
+  scale?: number;
+  /** Solo `rows`: columnas, textos y tope de filas. */
+  rowFields?: readonly RowFieldDef[];
+  rowLabel?: string;
+  addRowLabel?: string;
+  maxRows?: number;
   /** Solo para `custom`. */
   render?: (props: FieldRenderProps) => ReactNode;
   /** No editable al modificar (p. ej. el id). */
@@ -84,4 +106,21 @@ export function flattenSections<T>(sections: readonly FormSection<T>[]): FieldDe
 /** Nombres de los campos que se están mostrando (los ocultos por `visibleWhen` quedan fuera). */
 export function visibleFieldNames<T>(fields: readonly FieldDef<T>[], values: Draft): Set<string> {
   return new Set(fields.filter((f) => !f.visibleWhen || f.visibleWhen(values)).map((f) => f.name));
+}
+
+/** Lectura segura del valor de un campo de lista de textos. */
+export function asStringList(value: FormValue | undefined): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+}
+
+/** Lectura segura del valor de un campo `rows`. */
+export function asRows(value: FormValue | undefined): FormRow[] {
+  return Array.isArray(value) ? value.filter((v): v is FormRow => typeof v === 'object') : [];
+}
+
+/** Alias `clave.propiedad` -> nombre del campo, para ubicar errores de objetos anidados (`group`). */
+export function errorAliases<T>(fields: readonly FieldDef<T>[]): Record<string, string> {
+  return Object.fromEntries(
+    fields.flatMap((f) => (f.group ? [[`${f.group.key}.${f.group.prop}`, f.name]] : [])),
+  );
 }

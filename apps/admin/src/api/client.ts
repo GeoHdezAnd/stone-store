@@ -20,6 +20,7 @@ export type ApiFetch = <T = unknown>(path: string, options?: ApiRequestOptions) 
 const errorBody = z.object({
   error: z.string().optional(),
   issues: z.array(z.object({ path: z.string(), message: z.string() })).optional(),
+  message: z.string().optional(),
   field: z.string().optional(),
   ids: z.array(z.string()).optional(),
   requestId: z.string().optional(),
@@ -127,6 +128,7 @@ async function toApiError(res: Response): Promise<ApiError> {
     status: res.status,
     code,
     issues,
+    detail: body.message,
     field: body.field,
     ids: body.ids,
     requestId: body.requestId,

@@ -76,6 +76,8 @@ export function createSettingsRoutes(
         after: data,
         at: now(),
         requestId: ctx.requestId,
+        // Solo la fila PUBLIC entra a catalog.json; la MAIL (plantillas) no se publica.
+        ...(id === 'public' ? { scope: 'CATALOG' as const } : {}),
       });
       try {
         await repo.put(key, data, entry);

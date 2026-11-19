@@ -21,7 +21,11 @@ export function toFieldErrors(
   for (const issue of issues) {
     const segments = segmentsOf(issue.path);
     const key = aliases[segments.slice(0, 2).join('.')] ?? segments[0] ?? '';
-    if (!(key in errors)) errors[key] = issue.message;
+    // Errores dentro de una fila de una lista de objetos (p. ej. camiones.0.porKm): se indica la fila.
+    const rowIndex =
+      segments.length >= 3 && /^\d+$/.test(segments[1] ?? '') ? Number(segments[1]) : null;
+    const message = rowIndex === null ? issue.message : `Fila ${rowIndex + 1}: ${issue.message}`;
+    if (!(key in errors)) errors[key] = message;
   }
   return errors;
 }

@@ -31,5 +31,16 @@ export function useAsyncResource<T>(load: () => Promise<T>) {
     };
   }, [start]);
 
-  return { state, reload: start };
+  /** Vuelve a cargar sin pasar por «cargando»: conserva lo mostrado hasta tener lo nuevo. */
+  const refresh = useCallback(async () => {
+    const id = ++run.current;
+    try {
+      const data = await load();
+      if (id === run.current) setState({ status: 'ready', data });
+    } catch {
+      /* se conserva lo que ya se muestra */
+    }
+  }, [load]);
+
+  return { state, reload: start, refresh };
 }

@@ -323,8 +323,11 @@ describe('PUT: escritura', () => {
       accion: 'create',
       antes: null,
       despues: publicSettings(),
+      scope: 'CATALOG',
     });
     expect(repo.audits[1]).toMatchObject({ pk: 'ENTITY#settings#mail', accion: 'create' });
+    // La fila MAIL no se publica: su auditoría no entra al índice de cambios pendientes.
+    expect(repo.audits[1]).not.toHaveProperty('scope');
   });
 
   it('lee la fila previa ANTES de escribir (para decidir create/update)', async () => {

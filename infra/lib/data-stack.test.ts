@@ -2,7 +2,7 @@ import { App, Tags } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, it, expect } from 'vitest';
 
-import { DataStack } from './data-stack.js';
+import { AUDIT_SCOPE_INDEX, DataStack } from './data-stack.js';
 
 function synth(name: 'dev' | 'prod', emulated = false): Template {
   const app = new App();
@@ -27,11 +27,12 @@ const TABLAS: Record<string, { name: string; type: 'HASH' | 'RANGE' }[]> = {
   ],
   Publications: [{ name: 'version', type: 'HASH' }],
   Counters: [{ name: 'name', type: 'HASH' }],
+  FreightConfig: [{ name: 'version', type: 'HASH' }],
 };
 
 describe('DataStack', () => {
-  it('crea las 8 tablas', () => {
-    synth('dev').resourceCountIs('AWS::DynamoDB::Table', 8);
+  it('crea las 9 tablas', () => {
+    synth('dev').resourceCountIs('AWS::DynamoDB::Table', 9);
   });
 
   it.each(Object.entries(TABLAS))('la tabla %s tiene su clave exacta', (_nombre, claves) => {
@@ -47,16 +48,36 @@ describe('DataStack', () => {
 
   it('todas las tablas son PAY_PER_REQUEST', () => {
     const tablas = Object.values(synth('dev').findResources('AWS::DynamoDB::Table'));
-    expect(tablas).toHaveLength(8);
+    expect(tablas).toHaveLength(9);
     for (const t of tablas) expect(t.Properties.BillingMode).toBe('PAY_PER_REQUEST');
   });
 
-  it('no define índices secundarios', () => {
+  it('el ÚNICO índice secundario es el GSI disperso de AuditLog (scope + sk)', () => {
     const tablas = Object.values(synth('dev').findResources('AWS::DynamoDB::Table'));
-    for (const t of tablas) {
-      expect(t.Properties.GlobalSecondaryIndexes).toBeUndefined();
-      expect(t.Properties.LocalSecondaryIndexes).toBeUndefined();
-    }
+    const conIndices = tablas.filter((t) => t.Properties.GlobalSecondaryIndexes !== undefined);
+    expect(conIndices).toHaveLength(1);
+    for (const t of tablas) expect(t.Properties.LocalSecondaryIndexes).toBeUndefined();
+    const gsi = conIndices[0]!.Properties.GlobalSecondaryIndexes as Record<string, unknown>[];
+    expect(gsi).toHaveLength(1);
+    expect(gsi[0]).toMatchObject({
+      IndexName: 'scope-sk-index',
+      KeySchema: [
+        { AttributeName: 'scope', KeyType: 'HASH' },
+        { AttributeName: 'sk', KeyType: 'RANGE' },
+      ],
+      // Sin `antes`/`despues` (pueden traer datos de contacto): solo quién y qué acción.
+      Projection: { ProjectionType: 'INCLUDE', NonKeyAttributes: ['userId', 'accion'] },
+    });
+    // Es de AuditLog (clave pk + sk).
+    expect(
+      (conIndices[0]!.Properties.KeySchema as { AttributeName: string }[]).map(
+        (k) => k.AttributeName,
+      ),
+    ).toEqual(['pk', 'sk']);
+  });
+
+  it('exporta el nombre del índice para el entorno de las Lambdas', () => {
+    expect(AUDIT_SCOPE_INDEX).toBe('scope-sk-index');
   });
 
   it('en dev se borran con el stack y sin protección contra borrado', () => {
@@ -70,7 +91,7 @@ describe('DataStack', () => {
 
   it('en prod se conservan, con protección contra borrado y PITR', () => {
     const tablas = Object.values(synth('prod').findResources('AWS::DynamoDB::Table'));
-    expect(tablas).toHaveLength(8);
+    expect(tablas).toHaveLength(9);
     for (const t of tablas) {
       expect(t.DeletionPolicy).toBe('Retain');
       expect(t.Properties.DeletionProtectionEnabled).toBe(true);

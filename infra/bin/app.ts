@@ -6,6 +6,7 @@ import { CiStack } from '../lib/ci-stack.js';
 import { resolveEnv } from '../lib/config.js';
 import { DataStack } from '../lib/data-stack.js';
 import { MediaStack } from '../lib/media-stack.js';
+import { PublishStack } from '../lib/publish-stack.js';
 import { validateAllowedOrigins } from '../lib/origins.js';
 import { SiteStack } from '../lib/site-stack.js';
 
@@ -43,12 +44,27 @@ const media = new MediaStack(app, `canteras-media-${deploy.name}`, {
   allowedOrigins,
 });
 
+// Catálogo publicado (`catalog.json`): bucket privado y versionado, distinto del del sitio.
+const publish = new PublishStack(app, `canteras-publish-${deploy.name}`, { env, deploy });
+
+// Id de la distribución de CloudFront del sitio (salida `DistributionId` de `canteras-site-<env>`).
+// Opcional: sin él, publicar no invalida CloudFront y la Lambda no recibe ese permiso. Se pasa
+// por entorno para no crear una dependencia ApiStack -> SiteStack.
+const siteDistributionId = (process.env['SITE_DISTRIBUTION_ID'] ?? '').trim();
+if (siteDistributionId !== '' && !/^[A-Z0-9]{8,20}$/.test(siteDistributionId)) {
+  throw new Error(
+    'SITE_DISTRIBUTION_ID no tiene el formato de un id de distribución de CloudFront.',
+  );
+}
+
 new ApiStack(app, `canteras-api-${deploy.name}`, {
   env,
   deploy,
   userPool: auth.userPool,
   userPoolClient: auth.userPoolClient,
   mediaBucket: media.bucket,
+  publishBucket: publish.bucket,
+  ...(siteDistributionId === '' ? {} : { siteDistributionId }),
   tables: {
     stones: data.stones,
     projects: data.projects,
@@ -56,6 +72,8 @@ new ApiStack(app, `canteras-api-${deploy.name}`, {
     services: data.services,
     settings: data.settings,
     auditLog: data.auditLog,
+    publications: data.publications,
+    freightConfig: data.freightConfig,
   },
   allowedOrigins,
 });

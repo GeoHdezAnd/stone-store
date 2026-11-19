@@ -10,6 +10,14 @@ export const AUDIT_ACTIONS = [
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
+/**
+ * Ámbito del cambio, para el índice disperso de AuditLog (`scope` + `sk`). `CATALOG` marca lo que
+ * entra a `catalog.json` (piedras, proyectos, acabados, servicios y la fila PUBLIC de
+ * configuración): alimenta los «cambios pendientes» de Publicar. Sin `scope` el ítem no se indexa.
+ */
+export const AUDIT_SCOPES = ['CATALOG'] as const;
+export type AuditScope = (typeof AUDIT_SCOPES)[number];
+
 export interface AuditEntry {
   pk: string;
   sk: string;
@@ -17,6 +25,7 @@ export interface AuditEntry {
   accion: string;
   antes: unknown;
   despues: unknown;
+  scope?: AuditScope;
 }
 
 export interface AuditInput {
@@ -28,6 +37,7 @@ export interface AuditInput {
   after: unknown;
   at: Date;
   requestId: string;
+  scope?: AuditScope;
 }
 
 // DynamoDB limita un ítem a 400 KB; dejamos margen.
@@ -45,7 +55,7 @@ const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$/;
  * en el mismo milisegundo se sobrescriban entre sí.
  */
 export function buildAuditEntry(input: AuditInput): AuditEntry {
-  const { entityType, entityId, userId, action, before, after, at, requestId } = input;
+  const { entityType, entityId, userId, action, before, after, at, requestId, scope } = input;
   if (!ENTITY_TYPE_RE.test(entityType)) throw new Error('Auditoría: entityType inválido.');
   if (!ENTITY_ID_RE.test(entityId)) throw new Error('Auditoría: entityId inválido.');
   if (typeof userId !== 'string' || userId.trim() === '')
@@ -57,6 +67,10 @@ export function buildAuditEntry(input: AuditInput): AuditEntry {
   if (!(at instanceof Date) || Number.isNaN(at.getTime()))
     throw new Error('Auditoría: fecha inválida.');
 
+  if (scope !== undefined && !(AUDIT_SCOPES as readonly string[]).includes(scope)) {
+    throw new Error('Auditoría: scope no permitido.');
+  }
+
   const entry: AuditEntry = {
     pk: `ENTITY#${entityType}#${entityId}`,
     sk: `${at.toISOString()}#${requestId}`,
@@ -64,6 +78,7 @@ export function buildAuditEntry(input: AuditInput): AuditEntry {
     accion: action,
     antes: before ?? null,
     despues: after ?? null,
+    ...(scope === undefined ? {} : { scope }),
   };
   const bytes = Buffer.byteLength(JSON.stringify(entry), 'utf8');
   if (bytes > MAX_ITEM_BYTES) {

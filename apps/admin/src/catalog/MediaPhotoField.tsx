@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { useApi } from '../api/ApiContext';
 import { createMediaApi } from '../api/mediaApi';
 import { PhotoListField } from '../components/PhotoListField';
+import { asStringList } from '../components/fieldTypes';
 import type { FieldRenderProps } from '../components/fieldTypes';
 import { useToastedAction } from '../hooks/useToastedAction';
 
@@ -24,7 +25,7 @@ export function MediaPhotoField({
   const media = useMemo(() => createMediaApi(apiFetch), [apiFetch]);
   const { pending, run } = useToastedAction();
   const ownerId = typeof props.values.id === 'string' ? props.values.id : '';
-  const photos = Array.isArray(props.value) ? props.value : [];
+  const photos = asStringList(props.value);
 
   return (
     <PhotoListField

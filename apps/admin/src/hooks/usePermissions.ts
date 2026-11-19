@@ -7,5 +7,11 @@ import { useAuth } from '../auth/AuthContext';
 export function usePermissions() {
   const { user } = useAuth();
   const isOwner = user?.roles.includes('owner') ?? false;
-  return { canDeactivate: isOwner, canChangeActive: isOwner, canEditSettings: isOwner };
+  return {
+    canDeactivate: isOwner,
+    canChangeActive: isOwner,
+    canEditSettings: isOwner,
+    canPublish: isOwner,
+    canEditFreight: isOwner,
+  };
 }

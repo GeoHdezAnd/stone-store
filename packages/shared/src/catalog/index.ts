@@ -1,4 +1,5 @@
 export * from './common';
+export * from './document';
 export * from './finish';
 export * from './project';
 export * from './service';

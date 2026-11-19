@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 import type { z } from 'zod';
 import { ApiError, describeError } from '../api/errors';
 import { EntityForm } from '../components/EntityForm';
-import type { FieldDef } from '../components/EntityForm';
-import { visibleFieldNames } from '../components/fieldTypes';
+import { errorAliases, flattenSections, visibleFieldNames } from '../components/fieldTypes';
+import type { FormSection } from '../components/fieldTypes';
 import { useToastedAction } from '../hooks/useToastedAction';
 import { fromDraft, toDraft } from '../lib/draft';
 import type { Draft } from '../lib/draft';
@@ -15,7 +15,8 @@ interface SettingsSectionProps<T> {
   title: string;
   description?: string;
   schema: z.ZodType<T>;
-  fields: readonly FieldDef<Draft>[];
+  /** Secciones del formulario (con una sola, sin título, basta). */
+  sections: readonly FormSection<never>[];
   /** Valor guardado; `null` si todavía no existe. */
   initial: T | null;
   /** Si es `false` se muestra en solo lectura y sin botón de guardar. */
@@ -24,6 +25,10 @@ interface SettingsSectionProps<T> {
   successMessage: string;
   /** Contenido extra bajo el formulario (ayudas, vista previa) según el borrador actual. */
   renderExtra?: (draft: Draft) => ReactNode;
+  /** Se llama tras guardar bien (p. ej. para refrescar una lista). */
+  onSaved?: ((values: T) => void) | undefined;
+  /** Se llama si el guardado falla (p. ej. para ofrecer «Recargar» ante un conflicto). */
+  onError?: ((err: unknown) => void) | undefined;
 }
 
 /** Sección de configuración con su propio borrador, validación y guardado. */
@@ -31,14 +36,18 @@ export function SettingsSection<T extends Record<string, unknown>>({
   title,
   description,
   schema,
-  fields,
+  sections: formSections,
   initial,
   canEdit,
   onSave,
   successMessage,
   renderExtra,
+  onSaved,
+  onError,
 }: SettingsSectionProps<T>) {
   const headingId = useId();
+  const fields = useMemo(() => flattenSections(formSections), [formSections]);
+  const aliases = useMemo(() => errorAliases(fields), [fields]);
   const { pending, run } = useToastedAction();
   const [draft, setDraft] = useState<Draft>(() => toDraft(initial, fields));
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -47,8 +56,12 @@ export function SettingsSection<T extends Record<string, unknown>>({
   const [saved, setSaved] = useState(initial !== null);
 
   const shownFields = useMemo(
-    () => fields.map((f) => ({ ...f, disabled: f.disabled || !canEdit })),
-    [fields, canEdit],
+    () =>
+      formSections.map((section) => ({
+        ...section,
+        fields: section.fields.map((f) => ({ ...f, disabled: f.disabled || !canEdit })),
+      })),
+    [formSections, canEdit],
   );
 
   function showErrors(next: FieldErrors) {
@@ -61,16 +74,18 @@ export function SettingsSection<T extends Record<string, unknown>>({
     setFormError(null);
     const parsed = schema.safeParse(fromDraft(draft, fields));
     if (!parsed.success) {
-      showErrors(toFieldErrors(parsed.error.issues));
+      showErrors(toFieldErrors(parsed.error.issues, aliases));
       return;
     }
     setErrors({});
     try {
       await run(() => onSave(parsed.data), { loading: 'Guardando…', success: successMessage });
       setSaved(true);
+      onSaved?.(parsed.data);
     } catch (err) {
+      onError?.(err);
       if (err instanceof ApiError && err.issues?.length) {
-        showErrors(apiIssuesToFieldErrors(err.issues));
+        showErrors(apiIssuesToFieldErrors(err.issues, aliases));
       } else {
         setFormError(describeError(err));
       }
@@ -90,8 +105,8 @@ export function SettingsSection<T extends Record<string, unknown>>({
         </p>
       ) : null}
       {!canEdit ? <p className="muted">Solo el dueño puede editar esta sección.</p> : null}
-      <EntityForm<Draft>
-        sections={[{ fields: shownFields }]}
+      <EntityForm<never>
+        sections={shownFields}
         values={draft}
         errors={errors}
         onChange={(name, value) => setDraft((prev) => ({ ...prev, [name]: value }))}
