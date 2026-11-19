@@ -2,6 +2,14 @@
    diseño tenía en estilos en línea y los estados que el diseño no trae
    (cargando, error, vacío). Se usa junto con `styles.css`. */
 
+/* Tokens semánticos (texto blanco/claro sobre ellos cumple contraste >= 4.5:1). */
+:root {
+  --color-success: #1b7a3a;
+  --color-danger: var(--color-accent-700);
+  --color-warning: #b45309;
+  --color-info: var(--color-warning);
+}
+
 input[type='checkbox'] {
   accent-color: var(--color-accent-700);
   width: 18px;
@@ -78,7 +86,12 @@ input[type='checkbox'] {
 .side {
   flex: 1 1 220px;
   max-width: 260px;
-  align-self: stretch;
+  /* Fijo al alto de la ventana: no crece con la página; si el menú no cabe, se desplaza solo. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
   background: var(--color-surface);
   border-right: 2px solid var(--color-divider);
   padding: 24px 16px;
@@ -86,12 +99,63 @@ input[type='checkbox'] {
   flex-direction: column;
   gap: 24px;
 }
+/* En escritorio el panel no genera caja propia y el botón no se muestra. */
+.side-panel {
+  display: contents;
+}
+.side-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  cursor: pointer;
+  color: var(--color-text);
+  background: transparent;
+  border: 2px solid var(--color-text);
+}
+.side-toggle:focus-visible {
+  outline: 3px solid var(--color-accent-700);
+  outline-offset: 2px;
+}
 @media (max-width: 820px) {
   .side {
     max-width: none;
-    align-self: auto;
+    /* Encabezado fijo arriba: el botón del menú siempre está al alcance al hacer scroll.
+       Si el menú abierto no cabe en la ventana, se desplaza dentro del propio encabezado. */
+    position: sticky;
+    top: 0;
+    z-index: 9;
+    height: auto;
+    max-height: 100dvh;
+    overflow-y: auto;
+    align-self: stretch;
     border-right: 0;
     border-bottom: 2px solid var(--color-divider);
+    padding: 12px 16px;
+    gap: 12px;
+  }
+  /* Menú plegable (hamburguesa): el panel con la navegación y el usuario se abre con el botón. */
+  .side-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .side-toggle {
+    display: inline-flex;
+  }
+  .side-panel {
+    display: none;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .side[data-open='true'] .side-panel {
+    display: flex;
+  }
+  .side-user {
+    margin-top: 0;
   }
 }
 .side-brand {

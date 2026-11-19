@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { Column } from '../components/DataTable';
-import type { FieldDef } from '../components/EntityForm';
+import type { FormSection } from '../components/fieldTypes';
 import type { Noun } from '../lib/catalogLabels';
 
 /** Lo mínimo que comparten las entidades del catálogo. */
@@ -25,6 +25,7 @@ export interface CatalogConfig<T extends CatalogEntity> {
   searchText: (row: T) => string;
   /** Columnas propias de la entidad (la de estado y las acciones las agrega la pantalla). */
   columns: readonly Column<T>[];
-  /** Campos del formulario. `lockedOnEdit`: no se puede cambiar al editar (el id). */
-  fields: ReadonlyArray<FieldDef<T> & { lockedOnEdit?: boolean; ownerOnly?: boolean }>;
+  /** Secciones del formulario (una sin título basta). `lockedOnEdit`: no se puede cambiar al editar (el id). */
+  // Los campos pueden ser claves del borrador que no existen en la entidad (p. ej. objetos anidados).
+  sections: readonly FormSection<never>[];
 }

@@ -90,7 +90,11 @@ function EditorForm<T extends CatalogEntity>({
       labels={labels}
       editing={entity}
       onCancel={() => navigate(listPath)}
-      onSaved={(notice) => navigate(listPath, { state: { notice } })}
+      onSaved={(saved) => {
+        // Tras crear se queda en la edición de lo recién creado; tras editar no se mueve.
+        if (entity === null)
+          navigate(`${listPath}/${encodeURIComponent(saved.id)}`, { replace: true });
+      }}
     />
   );
 }

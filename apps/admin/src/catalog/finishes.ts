@@ -15,16 +15,25 @@ export const finishesConfig: CatalogConfig<Finish> = {
     { key: 'nombre', header: 'Nombre', render: (row) => row.nombre },
     { key: 'id', header: 'Id', render: (row) => row.id },
   ],
-  fields: [
+  sections: [
     {
-      name: 'id',
-      label: 'Id (slug)',
-      kind: 'text',
-      lockedOnEdit: true,
-      hint: 'Minúsculas, números y guiones. No se puede cambiar después. Ej. «corte-de-sierra».',
+      fields: [
+        {
+          name: 'id',
+          label: 'Id (slug)',
+          kind: 'text',
+          lockedOnEdit: true,
+          hint: 'Minúsculas, números y guiones. No se puede cambiar después. Ej. «corte-de-sierra».',
+        },
+        { name: 'nombre', label: 'Nombre', kind: 'text' },
+        { name: 'descripcion', label: 'Descripción', kind: 'textarea' },
+        {
+          name: 'activa',
+          label: 'Activo (visible en el sitio)',
+          kind: 'checkbox',
+          ownerOnly: true,
+        },
+      ],
     },
-    { name: 'nombre', label: 'Nombre', kind: 'text' },
-    { name: 'descripcion', label: 'Descripción', kind: 'textarea' },
-    { name: 'activa', label: 'Activo (visible en el sitio)', kind: 'checkbox', ownerOnly: true },
   ],
 };

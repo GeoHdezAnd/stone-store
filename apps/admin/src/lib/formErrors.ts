@@ -3,22 +3,53 @@ import type { ApiIssue } from '../api/errors';
 /** Errores por campo (clave = nombre del campo de primer nivel). `''` = error general. */
 export type FieldErrors = Record<string, string>;
 
-function topField(path: string): string {
-  return path.split(/[.[]/)[0] ?? '';
+/** Alias `clave.propiedad` -> nombre del campo, para campos que viven en un objeto anidado. */
+export type ErrorAliases = Readonly<Record<string, string>>;
+
+function segmentsOf(path: ReadonlyArray<PropertyKey> | string): string[] {
+  return typeof path === 'string'
+    ? path.split(/[.[\]]+/).filter(Boolean)
+    : path.map((p) => String(p));
 }
 
 /** Une issues de zod (path en arreglo) o de la API (path en texto); gana el primero por campo. */
 export function toFieldErrors(
   issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey> | string; message: string }>,
+  aliases: ErrorAliases = {},
 ): FieldErrors {
   const errors: FieldErrors = {};
   for (const issue of issues) {
-    const key = typeof issue.path === 'string' ? topField(issue.path) : String(issue.path[0] ?? '');
+    const segments = segmentsOf(issue.path);
+    const key = aliases[segments.slice(0, 2).join('.')] ?? segments[0] ?? '';
     if (!(key in errors)) errors[key] = issue.message;
   }
   return errors;
 }
 
-export function apiIssuesToFieldErrors(issues: readonly ApiIssue[]): FieldErrors {
-  return toFieldErrors(issues);
+export function apiIssuesToFieldErrors(
+  issues: readonly ApiIssue[],
+  aliases: ErrorAliases = {},
+): FieldErrors {
+  return toFieldErrors(issues, aliases);
+}
+
+/**
+ * Separa los errores que tienen un campo visible donde pintarse de los que no (ruta raíz, objeto
+ * completo, campo oculto o sin editor). Estos últimos se devuelven como un solo aviso general
+ * para que el botón de guardar nunca «parezca no hacer nada».
+ */
+export function partitionErrors(
+  errors: FieldErrors,
+  visibleNames: ReadonlySet<string>,
+): { field: FieldErrors; general: string | null } {
+  const field: FieldErrors = {};
+  const general: string[] = [];
+  for (const [key, message] of Object.entries(errors)) {
+    if (visibleNames.has(key)) field[key] = message;
+    else general.push(message);
+  }
+  return {
+    field,
+    general: general.length > 0 ? `Hay datos que no son válidos: ${general.join(' ')}` : null,
+  };
 }

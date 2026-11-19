@@ -35,10 +35,35 @@
   flex: 1 1 200px;
 }
 .form {
-  max-width: 640px;
+  max-width: 900px;
 }
-.form .field {
-  margin-top: 16px;
+.form-section {
+  margin-top: 28px;
+}
+.form-section-title {
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--color-divider);
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+}
+.form-grid .field {
+  min-width: 0;
+  scroll-margin-bottom: 96px;
+}
+.form-grid .field-full {
+  grid-column: 1 / -1;
+}
+@media (max-width: 700px) {
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .form-actions,
 .row-actions {
@@ -47,7 +72,13 @@
   gap: 12px;
 }
 .form-actions {
-  margin-top: 24px;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: 32px;
+  padding: 12px 0;
+  background: var(--color-bg);
+  border-top: 2px solid var(--color-divider);
 }
 .notice {
   display: flex;
@@ -60,4 +91,175 @@ dialog.dialog {
 }
 dialog.dialog::backdrop {
   background: color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
+}
+
+/* — toaster — */
+.toaster {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+  width: min(380px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toaster > div {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.toaster > div + div {
+  margin-top: 12px;
+}
+.toast {
+  --toast-color: var(--color-info);
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 12px 14px 14px;
+  background: var(--color-neutral-100);
+  color: var(--color-text);
+  border-radius: 12px;
+  border-left: 6px solid var(--toast-color);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--color-text) 18%, transparent);
+}
+.toast-success {
+  --toast-color: var(--color-success);
+}
+.toast-error {
+  --toast-color: var(--color-danger);
+}
+.toast-info {
+  --toast-color: var(--color-warning);
+}
+.toast-loading {
+  --toast-color: var(--color-neutral-800);
+}
+.toast-badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--color-neutral-100);
+  background: var(--toast-color);
+}
+.toast-body {
+  flex: 1;
+  min-width: 0;
+}
+.toast-body p {
+  margin: 0;
+}
+.toast-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+.toast-message {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--color-neutral-700);
+  overflow-wrap: anywhere;
+}
+.toast-close {
+  flex: none;
+  min-width: 32px;
+  min-height: 32px;
+  margin: -6px -2px 0 0;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--color-neutral-700);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.toast-close:hover {
+  color: var(--color-text);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: toast-in 0.18s ease-out;
+  }
+  .toast-spinner {
+    animation: toast-spin 0.9s linear infinite;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@keyframes toast-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 600px) {
+  .toaster {
+    width: auto;
+    right: 16px;
+  }
+}
+
+/* — configuración — */
+.settings-section {
+  margin-top: 32px;
+}
+.mail-help {
+  max-width: 640px;
+  margin-top: 24px;
+}
+.mail-help code {
+  margin-right: 8px;
+}
+.mail-preview {
+  margin: 0;
+  padding: 12px 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 14px;
+  background: var(--color-surface);
+  border: 1px dashed var(--color-divider);
+}
+
+/* — campos agrupados y de lista — */
+.field > .field-label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 5px;
+  color: color-mix(in srgb, var(--color-text) 75%, transparent);
+}
+.check-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.check-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.photo-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.photo-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-divider);
+  font-size: 14px;
+}
+.photo-key {
+  flex: 1 1 200px;
+  overflow-wrap: anywhere;
 }

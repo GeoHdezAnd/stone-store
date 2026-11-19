@@ -5,22 +5,17 @@ import { createApiClient } from '../api/client';
 import { AuthProvider } from '../auth/AuthContext';
 import { RequireAuth, RequireRole } from '../auth/guards';
 import { createAuthService } from '../auth/service';
+import { ToastProvider } from '../toast/ToastContext';
 import { CatalogRoutes } from '../catalog/CatalogRoutes';
 import { finishesConfig } from '../catalog/finishes';
+import { projectsConfig } from '../catalog/projects';
 import { servicesConfig } from '../catalog/services';
+import { stonesConfig } from '../catalog/stones';
+import { SettingsScreen } from '../settings/SettingsScreen';
 import type { AppConfig } from '../config';
 import { Layout } from './Layout';
 import { LoginPage } from '../pages/Login';
 import { NotFoundPage } from '../pages/NotFound';
-import { PlaceholderPage } from '../pages/Placeholder';
-
-function Screen({ title }: { title: string }) {
-  return (
-    <RequireRole roles={['owner', 'staff']}>
-      <PlaceholderPage title={title} />
-    </RequireRole>
-  );
-}
 
 /** Rutas de la app (sin router ni proveedores: así se prueban con MemoryRouter). */
 export function AppRoutes() {
@@ -35,8 +30,22 @@ export function AppRoutes() {
         }
       >
         <Route index element={<Navigate to="/stones" replace />} />
-        <Route path="stones" element={<Screen title="Piedras" />} />
-        <Route path="projects" element={<Screen title="Proyectos" />} />
+        <Route
+          path="stones/*"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <CatalogRoutes config={stonesConfig} />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="projects/*"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <CatalogRoutes config={projectsConfig} />
+            </RequireRole>
+          }
+        />
         <Route
           path="finishes/*"
           element={
@@ -53,7 +62,14 @@ export function AppRoutes() {
             </RequireRole>
           }
         />
-        <Route path="settings" element={<Screen title="Configuración" />} />
+        <Route
+          path="settings"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <SettingsScreen />
+            </RequireRole>
+          }
+        />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
@@ -69,9 +85,11 @@ export function App({ config }: { config: AppConfig }) {
   return (
     <AuthProvider service={auth}>
       <ApiContext.Provider value={apiFetch}>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <ToastProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </ToastProvider>
       </ApiContext.Provider>
     </AuthProvider>
   );

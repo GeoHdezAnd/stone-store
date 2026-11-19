@@ -91,6 +91,14 @@ export class ApiError extends Error {
   }
 }
 
+/** Error con un mensaje ya listo para mostrar en español (p. ej. fallos de subida de archivos). */
+export class UserMessageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UserMessageError';
+  }
+}
+
 const MESSAGES: Record<ApiErrorCode, string> = {
   unauthorized: 'Tu sesión expiró. Inicia sesión de nuevo.',
   forbidden: 'No tienes permiso para realizar esta acción.',
@@ -113,6 +121,7 @@ const MESSAGES: Record<ApiErrorCode, string> = {
 
 /** Mensaje en español para mostrar. No expone detalles internos ni repite datos del usuario. */
 export function describeError(err: unknown): string {
+  if (err instanceof UserMessageError) return err.message;
   if (err instanceof ApiError) {
     if (err.code === 'invalid_reference' && err.field && err.ids?.length) {
       return `El campo «${err.field}» hace referencia a elementos que no existen: ${err.ids.join(', ')}.`;
