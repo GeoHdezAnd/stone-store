@@ -301,3 +301,55 @@ dialog.dialog::backdrop {
   gap: 12px 16px;
   margin-bottom: 8px;
 }
+
+/* — línea de tiempo y solicitudes — */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--color-divider);
+}
+.timeline-item {
+  position: relative;
+  padding: 0 0 16px 12px;
+}
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -19px;
+  top: 6px;
+  width: 8px;
+  height: 8px;
+  background: var(--color-text);
+}
+.timeline-item p {
+  margin: 0;
+}
+.timeline-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.timeline-detail,
+.timeline-when {
+  font-size: 13px;
+}
+.quote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.price-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+@media (min-width: 700px) {
+  .price-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.preview-note {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}

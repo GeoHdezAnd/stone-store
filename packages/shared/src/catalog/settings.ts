@@ -86,7 +86,8 @@ const HTML_ESCAPES: Readonly<Record<string, string>> = {
   "'": '&#39;',
 };
 
-function escapeHtml(value: string): string {
+/** Escapa los caracteres con significado en HTML. */
+export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c);
 }
 
@@ -108,5 +109,26 @@ export function renderMailTemplate(
       throw new Error(`Falta el valor de la variable de plantilla: "${name}"`);
     }
     return escapeHtml(value);
+  });
+}
+
+/**
+ * Igual que `renderMailTemplate` pero SIN escapar: para el asunto y el cuerpo en texto plano (con
+ * escape saldría «&amp;»). Una sola pasada; lanza error con variables no permitidas o faltantes.
+ * Quien use el resultado en un encabezado (asunto) debe quitar los saltos de línea.
+ */
+export function renderMailText(
+  plantilla: string,
+  valores: Readonly<Record<MailTemplateVariable, string>>,
+): string {
+  return plantilla.replace(TOKEN, (_token, name: string) => {
+    if (!isAllowedVariable(name)) {
+      throw new Error(`Variable de plantilla no permitida: "${name}"`);
+    }
+    const value = Object.hasOwn(valores, name) ? valores[name] : undefined;
+    if (typeof value !== 'string') {
+      throw new Error(`Falta el valor de la variable de plantilla: "${name}"`);
+    }
+    return value;
   });
 }

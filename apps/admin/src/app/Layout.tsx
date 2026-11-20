@@ -8,13 +8,14 @@ const ACTIVE_ITEMS = [
   { to: '/projects', label: 'Proyectos' },
   { to: '/finishes', label: 'Acabados' },
   { to: '/services', label: 'Servicios' },
+  { to: '/quotes', label: 'Solicitudes' },
   { to: '/freight', label: 'Flete y tarifas' },
   { to: '/publish', label: 'Publicar' },
   { to: '/settings', label: 'Configuración' },
 ] as const;
 
 // Pantallas de fases posteriores (3 y 6): visibles pero desactivadas.
-const FUTURE_ITEMS = ['Resumen', 'Solicitudes'] as const;
+const FUTURE_ITEMS = ['Resumen'] as const;
 
 function roleLabel(roles: readonly string[]): string {
   if (roles.includes('owner')) return 'Dueño';

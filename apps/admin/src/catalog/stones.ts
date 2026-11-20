@@ -65,7 +65,6 @@ const traits: FormSection<Stone> = {
   title: 'Características',
   fields: [
     f({ name: 'colores', label: 'Colores', kind: 'list', hint: 'Uno por línea.', span: 'half' }),
-    f({ name: 'usos', label: 'Usos', kind: 'list', hint: 'Uno por línea.', span: 'half' }),
     f({
       name: 'categoriasUso',
       label: 'Categorías de uso',
@@ -184,7 +183,6 @@ export const stonesConfig: CatalogConfig<Stone> = {
     origen: '',
     tipoRoca: '',
     colores: [],
-    usos: [],
     categoriasUso: [],
     acabados: [],
     formatos: [],

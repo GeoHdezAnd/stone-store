@@ -52,7 +52,6 @@ export const stoneSchema = z
     origen: text(120, 'El origen'),
     tipoRoca: text(120, 'El tipo de roca'),
     colores: shortList('Los colores'),
-    usos: shortList('Los usos'),
     categoriasUso: uniqueArray(
       z.enum(USE_CATEGORIES, { error: 'Categoría de uso no válida' }),
       USE_CATEGORIES.length,

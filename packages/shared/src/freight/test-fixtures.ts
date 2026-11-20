@@ -8,7 +8,6 @@ const baseStone = {
   origen: 'Sedimentaria',
   tipoRoca: 'Roca sedimentaria',
   colores: ['Beige'],
-  usos: ['Fachada'],
   categoriasUso: ['fachadas'],
   acabados: ['Labrado'],
   formatos: ['Bloque'],

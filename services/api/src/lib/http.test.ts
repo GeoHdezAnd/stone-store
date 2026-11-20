@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HttpError, jsonResponse } from './http';
+import { csvResponse, HttpError, jsonResponse } from './http';
 
 describe('jsonResponse', () => {
   it('arma una respuesta payload v2 con cabeceras seguras', () => {
@@ -43,5 +43,27 @@ describe('HttpError', () => {
 
   it('usa el código como mensaje por defecto', () => {
     expect(new HttpError(404, 'not_found').message).toBe('not_found');
+  });
+});
+
+describe('csvResponse', () => {
+  it('arma un CSV adjunto con cabeceras seguras y sin caché', () => {
+    const res = csvResponse('﻿"a"\r\n', 'solicitudes-2026-11-19.csv', {
+      'x-export-truncated': 'true',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('﻿"a"\r\n');
+    expect(res.headers).toMatchObject({
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': 'attachment; filename="solicitudes-2026-11-19.csv"',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'x-export-truncated': 'true',
+    });
+  });
+
+  it('rechaza nombres de archivo con caracteres peligrosos (inyección de cabeceras)', () => {
+    expect(() => csvResponse('x', 'a"\r\nSet-Cookie: x')).toThrow();
+    expect(() => csvResponse('x', '../etc')).toThrow();
   });
 });

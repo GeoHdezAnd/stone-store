@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { ApiContext } from '../api/ApiContext';
-import { createApiClient } from '../api/client';
+import { ApiContext, ApiDownloadContext } from '../api/ApiContext';
+import { createApiClient, createApiDownloader } from '../api/client';
 import { AuthProvider } from '../auth/AuthContext';
 import { RequireAuth, RequireRole } from '../auth/guards';
 import { createAuthService } from '../auth/service';
@@ -12,6 +12,7 @@ import { projectsConfig } from '../catalog/projects';
 import { servicesConfig } from '../catalog/services';
 import { stonesConfig } from '../catalog/stones';
 import { FreightScreen } from '../freight/FreightScreen';
+import { QuoteRoutes } from '../quotes/QuoteRoutes';
 import { PublishScreen } from '../publish/PublishScreen';
 import { SettingsScreen } from '../settings/SettingsScreen';
 import type { AppConfig } from '../config';
@@ -65,6 +66,14 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="quotes/*"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <QuoteRoutes />
+            </RequireRole>
+          }
+        />
+        <Route
           path="freight"
           element={
             <RequireRole roles={['owner', 'staff']}>
@@ -100,14 +109,20 @@ export function App({ config }: { config: AppConfig }) {
     () => createApiClient({ apiUrl: config.apiUrl, auth }),
     [config.apiUrl, auth],
   );
+  const download = useMemo(
+    () => createApiDownloader({ apiUrl: config.apiUrl, auth }),
+    [config.apiUrl, auth],
+  );
   return (
     <AuthProvider service={auth}>
       <ApiContext.Provider value={apiFetch}>
-        <ToastProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </ToastProvider>
+        <ApiDownloadContext.Provider value={download}>
+          <ToastProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </ToastProvider>
+        </ApiDownloadContext.Provider>
       </ApiContext.Provider>
     </AuthProvider>
   );

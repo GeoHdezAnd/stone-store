@@ -15,7 +15,9 @@ import { PendingChanges } from './PendingChanges';
 import { PublicationHistory } from './PublicationHistory';
 
 type Confirm = { kind: 'publish' } | { kind: 'revert'; version: string } | null;
-type Problem = { kind: 'conflict' } | { kind: 'copy_failed' } | null;
+/** Acción que originó un `copy_failed`: el reintento debe repetir ESA acción (no crear otra versión). */
+type Origin = { kind: 'publish' } | { kind: 'revert'; version: string };
+type Problem = { kind: 'conflict' } | { kind: 'copy_failed'; origin: Origin } | null;
 
 /** Publicar: versión vigente, cambios pendientes, publicar e historial con reversión. */
 export function PublishScreen() {
@@ -31,6 +33,7 @@ export function PublishScreen() {
 
   /** Ejecuta publicar/revertir con toast, muestra el resultado y refresca sin salir de la página. */
   async function execute(
+    origin: Origin,
     action: () => Promise<PublishResult>,
     messages: {
       loading: string;
@@ -53,7 +56,7 @@ export function PublishScreen() {
     } catch (err) {
       if (err instanceof ApiError && err.code === 'conflict') setProblem({ kind: 'conflict' });
       else if (err instanceof ApiError && err.code === 'copy_failed')
-        setProblem({ kind: 'copy_failed' });
+        setProblem({ kind: 'copy_failed', origin });
     } finally {
       setConfirm(null);
       await refresh();
@@ -61,14 +64,14 @@ export function PublishScreen() {
   }
 
   const publish = () =>
-    execute(() => api.publish(), {
+    execute({ kind: 'publish' }, () => api.publish(), {
       loading: 'Publicando…',
       changed: (r) => `Versión ${r.version} publicada.`,
       unchanged: 'Sin cambios: el sitio ya está al día.',
     });
 
   const revert = (version: string) =>
-    execute(() => api.revert(version), {
+    execute({ kind: 'revert', version }, () => api.revert(version), {
       loading: 'Revirtiendo…',
       changed: (r) => `Se publicó ${r.version} con el contenido de ${version}.`,
       unchanged: 'Sin cambios: el sitio ya tiene ese contenido.',
@@ -109,7 +112,13 @@ export function PublishScreen() {
         <Notice tone="error">
           La versión se guardó, pero no se pudo actualizar la copia vigente del sitio.{' '}
           {canPublish ? (
-            <button type="button" className="link-btn" onClick={() => void publish()}>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() =>
+                void (problem.origin.kind === 'revert' ? revert(problem.origin.version) : publish())
+              }
+            >
               Reintentar
             </button>
           ) : null}

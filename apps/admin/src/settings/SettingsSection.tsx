@@ -29,6 +29,8 @@ interface SettingsSectionProps<T> {
   onSaved?: ((values: T) => void) | undefined;
   /** Se llama si el guardado falla (p. ej. para ofrecer «Recargar» ante un conflicto). */
   onError?: ((err: unknown) => void) | undefined;
+  /** Se llama cuando la persona edita algún campo. */
+  onEdit?: (() => void) | undefined;
 }
 
 /** Sección de configuración con su propio borrador, validación y guardado. */
@@ -44,6 +46,7 @@ export function SettingsSection<T extends Record<string, unknown>>({
   renderExtra,
   onSaved,
   onError,
+  onEdit,
 }: SettingsSectionProps<T>) {
   const headingId = useId();
   const fields = useMemo(() => flattenSections(formSections), [formSections]);
@@ -109,7 +112,10 @@ export function SettingsSection<T extends Record<string, unknown>>({
         sections={shownFields}
         values={draft}
         errors={errors}
-        onChange={(name, value) => setDraft((prev) => ({ ...prev, [name]: value }))}
+        onChange={(name, value) => {
+          onEdit?.();
+          setDraft((prev) => ({ ...prev, [name]: value }));
+        }}
         onSubmit={canEdit ? () => void submit() : undefined}
         submitLabel="Guardar"
         busy={pending}

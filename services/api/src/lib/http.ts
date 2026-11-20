@@ -39,3 +39,30 @@ export function jsonResponse(
     body: JSON.stringify(body),
   };
 }
+
+const CSV_FILENAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
+
+/** Respuesta CSV como archivo adjunto. El nombre es una lista blanca (evita inyectar cabeceras). */
+export function csvResponse(
+  body: string,
+  filename: string,
+  extraHeaders: Record<string, string> = {},
+): APIGatewayProxyStructuredResultV2 {
+  if (!CSV_FILENAME_RE.test(filename) || filename.includes('..')) {
+    throw new Error('Nombre de archivo CSV no permitido.');
+  }
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(extraHeaders)) headers[k.toLowerCase()] = v;
+  return {
+    statusCode: 200,
+    headers: {
+      ...headers,
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': `attachment; filename="${filename}"`,
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'strict-transport-security': 'max-age=31536000; includeSubDomains',
+    },
+    body,
+  };
+}

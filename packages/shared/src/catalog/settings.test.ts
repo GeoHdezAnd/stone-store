@@ -4,6 +4,7 @@ import {
   mailSettingsSchema,
   publicSettingsSchema,
   renderMailTemplate,
+  renderMailText,
   SETTINGS_ROW_KEYS,
 } from './settings';
 
@@ -182,5 +183,26 @@ describe('renderMailTemplate', () => {
 describe('SETTINGS_ROW_KEYS', () => {
   it('son las claves de fila que usa el seed: PUBLIC y MAIL', () => {
     expect(SETTINGS_ROW_KEYS).toEqual({ public: 'PUBLIC', mail: 'MAIL' });
+  });
+});
+
+describe('renderMailText (sin escape: asunto y texto plano)', () => {
+  const valores = {
+    nombre: 'Ana & <Luis>',
+    folio: 'CN-1',
+    piedras: 'x',
+    flete: 'y',
+    total: 'z',
+    vigencia: 'v',
+  };
+  it('NO escapa HTML (saldría «&amp;» en un asunto o texto plano)', () => {
+    expect(renderMailText('Hola {{nombre}}', valores)).toBe('Hola Ana & <Luis>');
+  });
+  it('una sola pasada: el valor nunca se reinterpreta como plantilla', () => {
+    expect(renderMailText('{{nombre}}', { ...valores, nombre: '{{folio}}' })).toBe('{{folio}}');
+  });
+  it('rechaza variables desconocidas y valores faltantes', () => {
+    expect(() => renderMailText('{{secreto}}', valores)).toThrow(/no permitida/);
+    expect(() => renderMailText('{{nombre}}', { folio: 'x' } as never)).toThrow(/Falta el valor/);
   });
 });

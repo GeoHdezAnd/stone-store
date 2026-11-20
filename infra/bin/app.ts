@@ -57,9 +57,21 @@ if (siteDistributionId !== '' && !/^[A-Z0-9]{8,20}$/.test(siteDistributionId)) {
   );
 }
 
+// Identidad verificada de SES desde la que se envían las cotizaciones (opcional). Sin ella, y fuera
+// del emulador, enviar cotizaciones responde 409 `mail_not_configured`. El formato se valida en ApiStack.
+const sesIdentityArn = (process.env['SES_IDENTITY_ARN'] ?? '').trim();
+
+// Identidades SES de destinatarios (lista separada por comas, opcional; ver la prop en ApiStack).
+const sesRecipientIdentityArns = (process.env['SES_RECIPIENT_IDENTITY_ARNS'] ?? '')
+  .split(',')
+  .map((a) => a.trim())
+  .filter((a) => a !== '');
+
 new ApiStack(app, `canteras-api-${deploy.name}`, {
   env,
   deploy,
+  ...(sesIdentityArn === '' ? {} : { sesIdentityArn }),
+  ...(sesRecipientIdentityArns.length === 0 ? {} : { sesRecipientIdentityArns }),
   userPool: auth.userPool,
   userPoolClient: auth.userPoolClient,
   mediaBucket: media.bucket,
@@ -74,6 +86,8 @@ new ApiStack(app, `canteras-api-${deploy.name}`, {
     auditLog: data.auditLog,
     publications: data.publications,
     freightConfig: data.freightConfig,
+    quotes: data.quotes,
+    ...(data.mailOutbox ? { mailOutbox: data.mailOutbox } : {}),
   },
   allowedOrigins,
 });

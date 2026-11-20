@@ -105,3 +105,25 @@ export function toCents(mxn: number): number {
  * `ACTIVE` y NO cumple este patrón. Lista blanca de los parámetros de ruta `{version}`.
  */
 export const FREIGHT_VERSION_PATTERN = /^t\d{4,}$/;
+
+/**
+ * Cuerpo de `PUT /admin/freight-config`: la configuración SIN lo que decide el servidor
+ * (`version`, `activa`, `creadaPor`, `creadaAt`), con `resumenCambio` obligatorio (1 a 300),
+ * `baseVersion` opcional (control de concurrencia) y `activar` opcional. Estricto: cualquier
+ * campo desconocido (incluido uno que intente fijar autor o fecha) se rechaza. Lo comparten el
+ * servidor y el panel de administración.
+ */
+export const freightConfigPutBodySchema = freightConfigSchema
+  .omit({ version: true, activa: true, creadaPor: true, creadaAt: true, resumenCambio: true })
+  .extend({
+    resumenCambio: z
+      .string({ error: 'El resumen del cambio debe ser texto' })
+      .min(1, 'El resumen del cambio es obligatorio')
+      .max(300, 'El resumen del cambio admite máximo 300 caracteres'),
+    baseVersion: z
+      .string({ error: 'baseVersion debe ser texto' })
+      .regex(FREIGHT_VERSION_PATTERN, 'baseVersion no es una versión válida')
+      .optional(),
+    activar: z.boolean({ error: 'activar debe ser verdadero o falso' }).optional(),
+  });
+export type FreightConfigPutBody = z.infer<typeof freightConfigPutBodySchema>;

@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { ApiFetch } from './client';
+import type { ApiDownload, ApiFetch } from './client';
 
 export const ApiContext = createContext<ApiFetch | null>(null);
 
@@ -8,4 +8,13 @@ export function useApi(): ApiFetch {
   const api = useContext(ApiContext);
   if (!api) throw new Error('useApi debe usarse dentro de <App>.');
   return api;
+}
+
+export const ApiDownloadContext = createContext<ApiDownload | null>(null);
+
+/** Descargas de archivos ya ligadas a la sesión. */
+export function useApiDownload(): ApiDownload {
+  const download = useContext(ApiDownloadContext);
+  if (!download) throw new Error('useApiDownload debe usarse dentro de <App>.');
+  return download;
 }

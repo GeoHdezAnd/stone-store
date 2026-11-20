@@ -20,6 +20,8 @@ interface FreightEditorProps {
   /** Se llama con la versión recién creada. */
   onSaved: (version: string) => void;
   onError: (err: unknown) => void;
+  /** La persona editó el formulario: conviene fijar la base elegida para no perder lo escrito. */
+  onEdit: () => void;
 }
 
 /** Contenedor del editor: carga la versión base y guarda una versión NUEVA a partir de ella. */
@@ -32,6 +34,7 @@ export function FreightEditor({
   canEdit,
   onSaved,
   onError,
+  onEdit,
 }: FreightEditorProps) {
   const { state, reload } = useAsyncResource(
     useCallback(() => api.get(baseVersion), [api, baseVersion]),
@@ -84,6 +87,7 @@ export function FreightEditor({
               onSaved(created.version);
             }}
             onError={onError}
+            onEdit={onEdit}
             successMessage="Versión de tarifas guardada."
           />
         </>

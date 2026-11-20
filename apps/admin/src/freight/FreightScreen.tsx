@@ -137,6 +137,9 @@ export function FreightScreen() {
               void list.reload();
             }}
             onError={(err) => setConflict(isConflict(err))}
+            // Con cambios en el formulario se fija la base: si tras recargar cambia la versión
+            // activa, el formulario no se reinicia y no se pierde lo escrito.
+            onEdit={() => setBaseChoice((choice) => choice ?? baseVersion)}
           />
         </section>
       ) : null}

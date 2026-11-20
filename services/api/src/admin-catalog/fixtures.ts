@@ -8,7 +8,6 @@ export function stone(over: Record<string, unknown> = {}): CatalogItem {
     origen: 'Sedimentaria',
     tipoRoca: 'Roca sedimentaria',
     colores: ['Beige'],
-    usos: ['Fachada'],
     categoriasUso: ['fachadas'],
     acabados: ['Labrado'],
     formatos: ['Bloque'],

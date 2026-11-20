@@ -24,6 +24,8 @@ interface BuildOptions {
   emulated?: boolean;
   allowedOrigins?: string[];
   siteDistributionId?: string;
+  sesIdentityArn?: string;
+  sesRecipientIdentityArns?: string[];
 }
 
 function build(opts: BuildOptions = {}): {
@@ -33,7 +35,14 @@ function build(opts: BuildOptions = {}): {
   media: MediaStack;
   publish: PublishStack;
 } {
-  const { name = 'dev', emulated = false, allowedOrigins, siteDistributionId } = opts;
+  const {
+    name = 'dev',
+    emulated = false,
+    allowedOrigins,
+    siteDistributionId,
+    sesIdentityArn,
+    sesRecipientIdentityArns,
+  } = opts;
   // Se omite el bundling con esbuild para que la síntesis sea rápida; el synth real de
   // `cdk synth` sí empaqueta.
   const app = new App({ context: { 'aws:cdk:bundling-stacks': [] } });
@@ -60,9 +69,13 @@ function build(opts: BuildOptions = {}): {
       auditLog: data.auditLog,
       publications: data.publications,
       freightConfig: data.freightConfig,
+      quotes: data.quotes,
+      ...(data.mailOutbox ? { mailOutbox: data.mailOutbox } : {}),
     },
     ...(allowedOrigins ? { allowedOrigins } : {}),
     ...(siteDistributionId ? { siteDistributionId } : {}),
+    ...(sesIdentityArn ? { sesIdentityArn } : {}),
+    ...(sesRecipientIdentityArns ? { sesRecipientIdentityArns } : {}),
   });
   Tags.of(app).add('Project', 'canteras-naturales');
   Tags.of(app).add('Env', name);
@@ -136,6 +149,8 @@ describe('ApiStack: invariante de seguridad de las rutas', () => {
         'ANY /admin/media/{proxy+}',
         'ANY /admin/projects',
         'ANY /admin/projects/{proxy+}',
+        'ANY /admin/quotes',
+        'ANY /admin/quotes/{proxy+}',
         'ANY /admin/publications',
         'ANY /admin/publications/{proxy+}',
         'ANY /admin/publish',
@@ -364,14 +379,15 @@ describe('ApiStack: Lambdas', () => {
       'services/api/src/admin-settings/handler.ts',
       'services/api/src/admin-publish/handler.ts',
       'services/api/src/admin-freight/handler.ts',
+      'services/api/src/admin-quotes/handler.ts',
     ]) {
       expect(existsSync(join(REPO, p)), p).toBe(true);
     }
   });
 
-  it('hay 7 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
+  it('hay 8 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Lambda::Function', 7);
+    t.resourceCountIs('AWS::Lambda::Function', 8);
     t.allResourcesProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
       MemorySize: 256,
@@ -382,7 +398,7 @@ describe('ApiStack: Lambdas', () => {
 
   it('cada función tiene su log group con retención de 1 semana (sin logRetention)', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Logs::LogGroup', 7);
+    t.resourceCountIs('AWS::Logs::LogGroup', 8);
     t.allResourcesProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
     t.allResourcesProperties('AWS::Lambda::Function', {
       LoggingConfig: { LogGroup: { Ref: Match.stringLikeRegexp('Logs') } },
@@ -436,6 +452,8 @@ describe('ApiStack: Lambdas', () => {
       'ANY /admin/freight-config/{proxy+}': /AdminFreight/,
       'ANY /admin/freight': /AdminFreight/,
       'ANY /admin/freight/{proxy+}': /AdminFreight/,
+      'ANY /admin/quotes': /AdminQuotes/,
+      'ANY /admin/quotes/{proxy+}': /AdminQuotes/,
       ...Object.fromEntries(
         RECURSOS_CATALOGO.flatMap((x) => [
           [`ANY /admin/${x}`, /AdminCatalog/],
@@ -833,6 +851,7 @@ describe('ApiStack: Lambda AdminMedia', () => {
         auditLog: data.auditLog,
         publications: data.publications,
         freightConfig: data.freightConfig,
+        quotes: data.quotes,
       },
     });
     const dir = app.synth().directory;
@@ -1013,6 +1032,7 @@ describe('ApiStack: Lambda AdminSettings', () => {
         auditLog: data.auditLog,
         publications: data.publications,
         freightConfig: data.freightConfig,
+        quotes: data.quotes,
       },
     });
     const dir = app.synth().directory;
@@ -1441,6 +1461,7 @@ describe('ApiStack: Lambda AdminFreight', () => {
       'AdminMedia',
       'AdminSettings',
       'AdminPublish',
+      'AdminQuotes',
     ]) {
       for (const s of sentenciasDe(t, f)) {
         if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
@@ -1459,5 +1480,298 @@ describe('ApiStack: Lambda AdminFreight', () => {
     const stage = Object.values(t.findResources('AWS::ApiGatewayV2::Stage'))[0]!;
     const keys = Object.keys(stage.Properties.RouteSettings ?? {});
     expect(keys.some((k) => k.includes('freight'))).toBe(false);
+  });
+});
+
+describe('ApiStack: Lambda AdminQuotes', () => {
+  const RUTAS = ['ANY /admin/quotes', 'ANY /admin/quotes/{proxy+}'];
+
+  it('las 2 rutas de solicitudes integran la Lambda AdminQuotes y son JWT', () => {
+    const t = synth();
+    const fn = idFuncion(t, 'AdminQuotes');
+    const integraciones = t.findResources('AWS::ApiGatewayV2::Integration');
+    const vistas: string[] = [];
+    for (const r of rutas(t)) {
+      const key = r['RouteKey'] as string;
+      if (!key.startsWith('ANY /admin/quotes')) continue;
+      expect(r['AuthorizationType'], key).toBe('JWT');
+      expect(r['AuthorizerId'], key).toBeDefined();
+      const target = JSON.stringify(r['Target']);
+      const idInt = Object.keys(integraciones).find((id) => target.includes(`"${id}"`))!;
+      expect(JSON.stringify(integraciones[idInt]!.Properties.IntegrationUri), key).toContain(
+        `"${fn}"`,
+      );
+      vistas.push(key);
+    }
+    expect(vistas.sort()).toEqual([...RUTAS].sort());
+  });
+
+  it('la invariante de seguridad sigue verde (solo GET /health es pública)', () => {
+    for (const emulated of [false, true])
+      expect(problemasDeSeguridad(synth({ emulated }))).toEqual([]);
+  });
+
+  it('el entorno referencia las tablas y nombra los 2 índices', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminQuotes')]!;
+    const vars = fn.Properties.Environment.Variables as Record<string, Json>;
+    expect(Object.keys(vars).sort()).toEqual([
+      'AUDIT_TABLE',
+      'QUOTES_BY_DATE_INDEX',
+      'QUOTES_BY_STATUS_INDEX',
+      'QUOTES_TABLE',
+      'SETTINGS_TABLE',
+    ]);
+    expect(vars['QUOTES_BY_STATUS_INDEX']).toBe('byStatus');
+    expect(vars['QUOTES_BY_DATE_INDEX']).toBe('byDate');
+    expect(tablaDeImport(dt, vars['QUOTES_TABLE']!)).toBe(
+      data.getLogicalId(data.quotes.node.defaultChild as CfnTable),
+    );
+    expect(tablaDeImport(dt, vars['AUDIT_TABLE']!)).toBe(
+      data.getLogicalId(data.auditLog.node.defaultChild as CfnTable),
+    );
+  });
+
+  function sentencias() {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const ss = sentenciasDe(t, 'AdminQuotes').filter((s) =>
+      lista(s['Action']).some((a) => String(a).startsWith('dynamodb:')),
+    );
+    const idDe = (tb: Table): string => data.getLogicalId(tb.node.defaultChild as CfnTable);
+    return { t, dt, data, ss, idDe };
+  }
+
+  it('IAM EXACTA: GetItem en la tabla, Query solo en los 2 índices, PutItem solo en transacción', () => {
+    const { dt, data, ss, idDe } = sentencias();
+    const delIndice = ss.filter((s) => lista(s['Action']).includes('dynamodb:Query'));
+    expect(delIndice).toHaveLength(1);
+    expect(lista(delIndice[0]!['Action'])).toEqual(['dynamodb:Query']);
+    expect(delIndice[0]!['Condition']).toBeUndefined();
+    const recursos = lista(delIndice[0]!['Resource']).map((r) => JSON.stringify(r));
+    expect(recursos).toHaveLength(2);
+    expect(recursos.some((r) => r.includes('/index/byStatus'))).toBe(true);
+    expect(recursos.some((r) => r.includes('/index/byDate'))).toBe(true);
+
+    const deTabla = ss.filter((s) => !lista(s['Action']).includes('dynamodb:Query'));
+    const quotes = deTabla.filter((s) => tablasDeSentencia(dt, s)[0] === idDe(data.quotes));
+    expect(quotes).toHaveLength(2);
+    const lectura = quotes.find((s) => s['Condition'] === undefined)!;
+    const escritura = quotes.find((s) => s['Condition'] !== undefined)!;
+    expect(lista(lectura['Action'])).toEqual(['dynamodb:GetItem']);
+    expect(lista(escritura['Action'])).toEqual(['dynamodb:PutItem']);
+    expect(escritura['Condition']).toEqual(CONDICION_TRANSACCION);
+
+    const audit = deTabla.filter((s) => tablasDeSentencia(dt, s)[0] === idDe(data.auditLog));
+    expect(audit).toHaveLength(1);
+    expect(lista(audit[0]!['Action'])).toEqual(['dynamodb:PutItem']);
+    expect(audit[0]!['Condition']).toEqual(CONDICION_TRANSACCION);
+  });
+
+  it('IAM: solo Quotes, AuditLog y Settings (sin Counters ni Stones), sin comodines, sin Scan/Update/Delete/S3/SES por defecto', () => {
+    const { t, dt, data, ss, idDe } = sentencias();
+    const tablas = new Set(
+      ss
+        .filter((s) => !lista(s['Action']).includes('dynamodb:Query'))
+        .map((s) => tablasDeSentencia(dt, s)[0]),
+    );
+    expect([...tablas].sort()).toEqual(
+      [idDe(data.quotes), idDe(data.auditLog), idDe(data.settings)].sort(),
+    );
+    for (const s of sentenciasDe(t, 'AdminQuotes')) {
+      expect(s['Effect']).toBe('Allow');
+      expect(JSON.stringify(s['Resource'])).not.toBe('"*"');
+      for (const a of lista(s['Action']) as string[]) {
+        expect(a).not.toContain('*');
+        expect(a).not.toMatch(
+          /Scan|UpdateItem|DeleteItem|BatchWriteItem|BatchGetItem|TransactWriteItems|^s3:|^ses:|^cloudfront:/,
+        );
+        if (!a.startsWith('dynamodb:')) expect(a).toMatch(/^logs:|^xray:/);
+      }
+    }
+  });
+
+  it('las otras Lambdas NO ganan permisos sobre Quotes ni reciben su variable', () => {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const q = data.getLogicalId(data.quotes.node.defaultChild as CfnTable);
+    for (const f of [
+      'Health',
+      'AdminMe',
+      'AdminCatalog',
+      'AdminMedia',
+      'AdminSettings',
+      'AdminPublish',
+      'AdminFreight',
+    ]) {
+      for (const s of sentenciasDe(t, f)) {
+        if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
+        expect(JSON.stringify(s['Resource']), f).not.toContain('/index/byStatus');
+        expect(JSON.stringify(s['Resource']), f).not.toContain('/index/byDate');
+        if (lista(s['Resource']).some((r) => JSON.stringify(r).includes('/index/'))) continue;
+        expect(tablasDeSentencia(dt, s), f).not.toContain(q);
+      }
+      const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, f)]!;
+      expect(Object.keys(fn.Properties.Environment?.Variables ?? {}), f).not.toContain(
+        'QUOTES_TABLE',
+      );
+    }
+  });
+
+  it('usa el throttling de la etapa (sin límite propio por ruta)', () => {
+    const stage = Object.values(synth().findResources('AWS::ApiGatewayV2::Stage'))[0]!;
+    expect(
+      Object.keys(stage.Properties.RouteSettings ?? {}).some((k) => k.includes('quotes')),
+    ).toBe(false);
+  });
+});
+
+describe('ApiStack: CORS expone las cabeceras del CSV', () => {
+  it('exposeHeaders incluye x-export-truncated, x-export-skipped y content-disposition', () => {
+    const api = Object.values(synth().findResources('AWS::ApiGatewayV2::Api'))[0]!;
+    const cors = api.Properties.CorsConfiguration as { ExposeHeaders?: string[] };
+    expect([...(cors.ExposeHeaders ?? [])].sort()).toEqual([
+      'content-disposition',
+      'x-export-skipped',
+      'x-export-truncated',
+    ]);
+  });
+});
+
+describe('ApiStack: AdminQuotes envía cotizaciones (3.3b)', () => {
+  const IDENTIDAD = 'arn:aws:ses:us-east-1:123456789012:identity/ventas@example.com';
+  // Sentencias de DynamoDB sobre TABLAS (sin la de Query, que apunta a ARNs de índice).
+  const dyn = (ss: Json[]) =>
+    ss.filter(
+      (s) =>
+        lista(s['Action']).some((a) => String(a).startsWith('dynamodb:')) &&
+        !lista(s['Action']).includes('dynamodb:Query'),
+    );
+
+  function conEntorno(opts: BuildOptions) {
+    const { stack, data } = build(opts);
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminQuotes')]!;
+    const vars = fn.Properties.Environment.Variables as Record<string, Json>;
+    return { t, dt, data, vars, ss: sentenciasDe(t, 'AdminQuotes') };
+  }
+
+  it('Settings: solo GetItem y únicamente las filas MAIL y PUBLIC (LeadingKeys)', () => {
+    const { dt, data, ss } = conEntorno({});
+    const id = data.getLogicalId(data.settings.node.defaultChild as CfnTable);
+    const deSettings = dyn(ss).filter((s) => tablasDeSentencia(dt, s)[0] === id);
+    expect(deSettings).toHaveLength(1);
+    expect(lista(deSettings[0]!['Action'])).toEqual(['dynamodb:GetItem']);
+    expect(deSettings[0]!['Condition']).toEqual({
+      'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC', 'MAIL'] },
+    });
+  });
+
+  it('sin identidad SES ni emulador: sin transporte, sin permisos de SES (la ruta responde mail_not_configured)', () => {
+    const { vars, ss } = conEntorno({});
+    expect(vars['MAIL_TRANSPORT']).toBeUndefined();
+    expect(vars['MAIL_OUTBOX_TABLE']).toBeUndefined();
+    expect(JSON.stringify(ss)).not.toContain('ses:');
+  });
+
+  it('con identidad SES: MAIL_TRANSPORT=ses y ses:SendEmail SOLO sobre esa identidad', () => {
+    const { vars, ss } = conEntorno({ sesIdentityArn: IDENTIDAD });
+    expect(vars['MAIL_TRANSPORT']).toBe('ses');
+    const ses = ss.filter((s) => lista(s['Action']).some((a) => String(a).startsWith('ses:')));
+    expect(ses).toHaveLength(1);
+    expect(lista(ses[0]!['Action'])).toEqual(['ses:SendEmail']);
+    expect(ses[0]!['Resource']).toBe(IDENTIDAD);
+    expect(ses[0]!['Effect']).toBe('Allow');
+  });
+
+  it('las otras Lambdas nunca reciben ses: ni MAIL_TRANSPORT', () => {
+    const { stack } = build({ sesIdentityArn: IDENTIDAD });
+    const t = Template.fromStack(stack);
+    for (const f of [
+      'Health',
+      'AdminMe',
+      'AdminCatalog',
+      'AdminMedia',
+      'AdminSettings',
+      'AdminPublish',
+      'AdminFreight',
+    ]) {
+      expect(JSON.stringify(sentenciasDe(t, f)), f).not.toContain('ses:');
+      const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, f)]!;
+      expect(Object.keys(fn.Properties.Environment?.Variables ?? {}), f).not.toContain(
+        'MAIL_TRANSPORT',
+      );
+    }
+  });
+
+  it('una identidad SES con formato inválido (o comodín) se rechaza al sintetizar', () => {
+    for (const bad of [
+      '*',
+      'arn:aws:ses:us-east-1:123456789012:*',
+      'ventas@example.com',
+      'arn:aws:s3:::bucket',
+    ]) {
+      expect(() => build({ sesIdentityArn: bad }), bad).toThrow(/identidad/i);
+    }
+  });
+
+  it('con emulador: outbox en DynamoDB (PutItem solo en esa tabla) y sin permisos de SES', () => {
+    const { vars, ss, dt, data } = conEntorno({ emulated: true, sesIdentityArn: IDENTIDAD });
+    expect(vars['MAIL_TRANSPORT']).toBe('outbox');
+    expect(tablaDeImport(dt, vars['MAIL_OUTBOX_TABLE']!)).toBe(
+      data.getLogicalId(data.mailOutbox!.node.defaultChild as CfnTable),
+    );
+    expect(JSON.stringify(ss)).not.toContain('ses:');
+    const out = dyn(ss).filter(
+      (s) =>
+        tablasDeSentencia(dt, s)[0] ===
+        data.getLogicalId(data.mailOutbox!.node.defaultChild as CfnTable),
+    );
+    expect(out).toHaveLength(1);
+    expect(lista(out[0]!['Action'])).toEqual(['dynamodb:PutItem']);
+  });
+
+  it('sesRecipientIdentityArns (sandbox): se agregan al mismo permiso ses:SendEmail, vacía por defecto', () => {
+    const dest = 'arn:aws:ses:us-east-1:123456789012:identity/cliente@example.com';
+    const { ss } = conEntorno({ sesIdentityArn: IDENTIDAD, sesRecipientIdentityArns: [dest] });
+    const ses = ss.filter((s) => lista(s['Action']).some((a) => String(a).startsWith('ses:')));
+    expect(ses).toHaveLength(1);
+    expect(lista(ses[0]!['Action'])).toEqual(['ses:SendEmail']);
+    expect(lista(ses[0]!['Resource'])).toEqual([IDENTIDAD, dest]);
+    // Por defecto (vacía): solo la identidad del remitente.
+    const base = conEntorno({ sesIdentityArn: IDENTIDAD, sesRecipientIdentityArns: [] }).ss.filter(
+      (s) => lista(s['Action']).some((a) => String(a).startsWith('ses:')),
+    );
+    expect(base[0]!['Resource']).toBe(IDENTIDAD);
+  });
+
+  it('sesRecipientIdentityArns se valida igual que el remitente (sin comodines) y no aplica con emulador', () => {
+    for (const bad of [
+      '*',
+      'arn:aws:ses:us-east-1:123456789012:identity/*',
+      'cliente@example.com',
+    ]) {
+      expect(
+        () => build({ sesIdentityArn: IDENTIDAD, sesRecipientIdentityArns: [bad] }),
+        bad,
+      ).toThrow(/identidad/i);
+    }
+    const emu = conEntorno({
+      emulated: true,
+      sesIdentityArn: IDENTIDAD,
+      sesRecipientIdentityArns: ['arn:aws:ses:us-east-1:123456789012:identity/cliente@example.com'],
+    });
+    expect(JSON.stringify(emu.ss)).not.toContain('ses:');
+  });
+
+  it('la ruta de envío (POST /admin/quotes/{id}/send) cae bajo las rutas JWT existentes', () => {
+    expect(problemasDeSeguridad(synth({ sesIdentityArn: IDENTIDAD }))).toEqual([]);
+    const keys = rutas(synth()).map((r) => r['RouteKey']);
+    expect(keys).toContain('ANY /admin/quotes/{proxy+}');
   });
 });

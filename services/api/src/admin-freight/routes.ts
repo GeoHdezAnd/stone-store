@@ -2,6 +2,7 @@ import {
   estimateFreight,
   FREIGHT_VERSION_PATTERN,
   FreightError,
+  freightConfigPutBodySchema,
   freightConfigSchema,
   parseFreightSimulateRequest,
   stoneSchema,
@@ -9,7 +10,6 @@ import {
   type FreightItem,
   type Stone,
 } from '@canteras/shared';
-import { z } from 'zod';
 import { buildAuditEntry } from '../lib/audit';
 import { HttpError, jsonResponse } from '../lib/http';
 import { createRouter, route, type Route, type RouterOptions } from '../lib/router';
@@ -33,26 +33,6 @@ const MAX_LIMIT = 50;
 
 const formatVersion = (n: number): string => `t${String(n).padStart(4, '0')}`;
 const sequenceOf = (version: string): number => Number(version.slice(1));
-
-/**
- * Cuerpo de `PUT /admin/freight-config`: la configuración SIN lo que decide el servidor
- * (`version`, `activa`, `creadaPor`, `creadaAt`), con `resumenCambio` obligatorio (1 a 300),
- * `baseVersion` opcional (control de concurrencia) y `activar` opcional. Estricto: cualquier
- * campo desconocido (incluido uno que intente fijar autor o fecha) se rechaza.
- */
-const putBodySchema = freightConfigSchema
-  .omit({ version: true, activa: true, creadaPor: true, creadaAt: true, resumenCambio: true })
-  .extend({
-    resumenCambio: z
-      .string({ error: 'El resumen del cambio debe ser texto' })
-      .min(1, 'El resumen del cambio es obligatorio')
-      .max(300, 'El resumen del cambio admite máximo 300 caracteres'),
-    baseVersion: z
-      .string({ error: 'baseVersion debe ser texto' })
-      .regex(FREIGHT_VERSION_PATTERN, 'baseVersion no es una versión válida')
-      .optional(),
-    activar: z.boolean({ error: 'activar debe ser verdadero o falso' }).optional(),
-  });
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -142,7 +122,7 @@ export function createFreightRoutes(deps: FreightDeps): Route[] {
     ),
 
     route('PUT', '/admin/freight-config', ['owner'], async (ctx) => {
-      const parsed = putBodySchema.safeParse(ctx.body);
+      const parsed = freightConfigPutBodySchema.safeParse(ctx.body);
       if (!parsed.success) return validationErrorResponse(parsed.error);
       const { baseVersion, activar, ...fields } = parsed.data;
 

@@ -29,8 +29,13 @@ export function FreightSimulator({
   const [version, setVersion] = useState('');
   const [skipZoneCheck, setSkipZoneCheck] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [apiError, setApiError] = useState<string | null>(null);
-  const [result, setResult] = useState<FreightEstimate | null>(null);
+  // El resultado y el error de la API se asocian a las entradas con que se calcularon: si cambian,
+  // dejan de mostrarse (no se enseña un estimado desactualizado).
+  const [apiOutcome, setApiOutcome] = useState<{ key: string; error: string } | null>(null);
+  const [outcome, setOutcome] = useState<{ key: string; estimate: FreightEstimate } | null>(null);
+  const inputsKey = JSON.stringify([codigoPostal, distanciaKm, rows, version, skipZoneCheck]);
+  const result = outcome?.key === inputsKey ? outcome.estimate : null;
+  const apiError = apiOutcome?.key === inputsKey ? apiOutcome.error : null;
 
   const stoneOptions = stones.map((s) => ({ value: s.id, label: s.nombre }));
   const setRow = (i: number, next: SimRow) =>
@@ -38,17 +43,19 @@ export function FreightSimulator({
 
   async function calculate() {
     setErrors([]);
-    setApiError(null);
-    setResult(null);
+    setApiOutcome(null);
+    setOutcome(null);
+    const key = inputsKey;
     const built = buildSimulateRequest({ codigoPostal, distanciaKm, rows, version, skipZoneCheck });
     if (!built.ok) {
       setErrors(built.errors);
       return;
     }
     try {
-      setResult(await run(() => api.simulate(built.request)));
+      const estimate = await run(() => api.simulate(built.request));
+      setOutcome({ key, estimate });
     } catch (err) {
-      setApiError(describeError(err));
+      setApiOutcome({ key, error: describeError(err) });
     }
   }
 

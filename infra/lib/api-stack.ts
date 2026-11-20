@@ -23,7 +23,7 @@ import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { type Construct } from 'constructs';
 
 import { FLOCI_API_PORT, FLOCI_IP, type DeployEnv } from './config.js';
-import { AUDIT_SCOPE_INDEX } from './data-stack.js';
+import { AUDIT_SCOPE_INDEX, QUOTES_BY_DATE_INDEX, QUOTES_BY_STATUS_INDEX } from './data-stack.js';
 import { validateAllowedOrigins } from './origins.js';
 
 // Se reexporta desde su módulo compartido (también lo usa MediaStack).
@@ -45,6 +45,9 @@ export interface ApiTables {
   readonly auditLog: TableRef;
   readonly publications: TableRef;
   readonly freightConfig: TableRef;
+  readonly quotes: TableRef;
+  /** Solo con emulador (DataStack): bandeja de salida de correos de desarrollo. */
+  readonly mailOutbox?: TableRef;
 }
 
 /** Bucket de media reducido a lo que usa esta pila (nombre y ARN). */
@@ -68,9 +71,26 @@ export interface ApiStackProps extends StackProps {
    * prop (no se importa SiteStack: evita una dependencia ApiStack -> SiteStack).
    */
   readonly siteDistributionId?: string;
+  /**
+   * ARN de la IDENTIDAD verificada de SES (`arn:aws:ses:<región>:<cuenta>:identity/<dominio o correo>`)
+   * desde la que se envían las cotizaciones. Opcional: sin ella (y sin emulador) la ruta de envío
+   * responde 409 `mail_not_configured` y la Lambda no recibe permisos de SES. SES en sandbox solo
+   * entrega a destinatarios verificados.
+   */
+  readonly sesIdentityArn?: string;
+  /**
+   * ARNs de identidades SES de los DESTINATARIOS (opcional, vacío por defecto). En el sandbox de SES
+   * el envío puede exigir permiso también sobre las identidades verificadas del destinatario (o un
+   * recurso `identity/*` con la condición `ses:FromAddress`); no se asume: se confirma en el smoke
+   * test del hito de AWS real. Se validan igual que `sesIdentityArn` (sin comodines).
+   */
+  readonly sesRecipientIdentityArns?: string[];
   /** Orígenes CORS permitidos. Obligatorio en prod; en dev por defecto el dashboard local. */
   readonly allowedOrigins?: string[];
 }
+
+// Identidad de SES concreta (sin comodines).
+const SES_IDENTITY_ARN_RE = /^arn:aws:ses:[a-z0-9-]+:\d{12}:identity\/[A-Za-z0-9._@+-]+$/;
 
 // Claves de ruta de la subida de fotos (las emite `addAdminResource('media', ...)`).
 const MEDIA_ROUTE_KEYS = ['ANY /admin/media', 'ANY /admin/media/{proxy+}'] as const;
@@ -115,6 +135,7 @@ export class ApiStack extends Stack {
   public readonly adminSettingsFunction: IFunction;
   public readonly adminPublishFunction: IFunction;
   public readonly adminFreightFunction: IFunction;
+  public readonly adminQuotesFunction: IFunction;
 
   public constructor(scope: Construct, id: string, props: ApiStackProps) {
     const {
@@ -125,10 +146,20 @@ export class ApiStack extends Stack {
       mediaBucket,
       publishBucket,
       siteDistributionId,
+      sesIdentityArn,
+      sesRecipientIdentityArns,
       allowedOrigins,
       ...stackProps
     } = props;
     super(scope, id, stackProps);
+
+    for (const arn of [sesIdentityArn, ...(sesRecipientIdentityArns ?? [])]) {
+      if (arn !== undefined && !SES_IDENTITY_ARN_RE.test(arn)) {
+        throw new Error(
+          'La identidad de SES no tiene el formato arn:aws:ses:<región>:<cuenta>:identity/<nombre> (sin comodines).',
+        );
+      }
+    }
 
     const isProd = deploy.name === 'prod';
     const origins = validateAllowedOrigins(deploy, allowedOrigins);
@@ -157,6 +188,8 @@ export class ApiStack extends Stack {
           CorsHttpMethod.OPTIONS,
         ],
         allowHeaders: ['authorization', 'content-type'],
+        // El dashboard lee estas cabeceras de la exportación CSV (sin esto el navegador las oculta).
+        exposeHeaders: ['x-export-truncated', 'x-export-skipped', 'content-disposition'],
         maxAge: Duration.days(1),
         allowCredentials: false,
       },
@@ -444,6 +477,91 @@ export class ApiStack extends Stack {
       }),
     );
 
+    // Solicitudes de cotización (datos personales: nombre, teléfono, correo). Mínimo privilegio:
+    // Quotes se lee con GetItem (detalle) y Query SOLO sobre sus 2 índices (lista y CSV; no la
+    // tabla base, ni Scan); se escribe con PutItem SOLO dentro de una transacción (solicitud con
+    // condición de `rev` + auditoría; el reclamo/liberación del candado de envío es un Put
+    // condicionado sin auditoría). AuditLog: PutItem en transacción. Settings: solo GetItem de las
+    // filas PUBLIC y MAIL (abajo). Transporte de correo: SES con `ses:SendEmail` sobre la identidad
+    // configurada, u outbox DynamoDB con emulador (abajo). Sin Stones, Counters (el folio lo genera
+    // el flujo de creación de la fase 4 y el seed) ni S3. Floci NO aplica IAM: verificar en AWS real.
+    const adminQuotes = makeFunction('AdminQuotes', 'admin-quotes');
+    this.adminQuotesFunction = adminQuotes;
+    adminQuotes.addEnvironment('QUOTES_TABLE', tables.quotes.tableName);
+    adminQuotes.addEnvironment('AUDIT_TABLE', tables.auditLog.tableName);
+    adminQuotes.addEnvironment('QUOTES_BY_STATUS_INDEX', QUOTES_BY_STATUS_INDEX);
+    adminQuotes.addEnvironment('QUOTES_BY_DATE_INDEX', QUOTES_BY_DATE_INDEX);
+    adminQuotes.addEnvironment('SETTINGS_TABLE', tables.settings.tableName);
+    // Settings: solo GetItem de las filas PUBLIC (remitente, patio) y MAIL (plantilla) para armar el
+    // correo de la cotización.
+    adminQuotes.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [tables.settings.tableArn],
+        conditions: {
+          'ForAllValues:StringEquals': {
+            'dynamodb:LeadingKeys': [SETTINGS_ROW_KEYS.public, SETTINGS_ROW_KEYS.mail],
+          },
+        },
+      }),
+    );
+    // Transporte de correo: emulador -> bandeja `MailOutbox` (DynamoDB); AWS real -> SES, solo si hay
+    // identidad configurada; si no, ninguna variable y la ruta responde 409 `mail_not_configured`.
+    if (deploy.emulated && tables.mailOutbox) {
+      adminQuotes.addEnvironment('MAIL_TRANSPORT', 'outbox');
+      adminQuotes.addEnvironment('MAIL_OUTBOX_TABLE', tables.mailOutbox.tableName);
+      adminQuotes.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ['dynamodb:PutItem'],
+          resources: [tables.mailOutbox.tableArn],
+        }),
+      );
+    } else if (!deploy.emulated && sesIdentityArn !== undefined) {
+      adminQuotes.addEnvironment('MAIL_TRANSPORT', 'ses');
+      adminQuotes.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ['ses:SendEmail'],
+          // Remitente y, solo si se pasan, identidades de destinatarios (sandbox; ver la prop).
+          resources: [sesIdentityArn, ...(sesRecipientIdentityArns ?? [])],
+        }),
+      );
+    }
+    adminQuotes.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [tables.quotes.tableArn],
+      }),
+    );
+    adminQuotes.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:Query'],
+        resources: [QUOTES_BY_STATUS_INDEX, QUOTES_BY_DATE_INDEX].map(
+          (i) => `${tables.quotes.tableArn}/index/${i}`,
+        ),
+      }),
+    );
+    adminQuotes.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.quotes.tableArn],
+        conditions: soloEnTransaccion,
+      }),
+    );
+    adminQuotes.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.auditLog.tableArn],
+        conditions: soloEnTransaccion,
+      }),
+    );
+
     // ÚNICA ruta pública, marcada explícitamente.
     this.httpApi.addRoutes({
       path: '/health',
@@ -467,6 +585,7 @@ export class ApiStack extends Stack {
     addAdminResource('publications', adminPublish);
     addAdminResource('freight-config', adminFreight);
     addAdminResource('freight', adminFreight);
+    addAdminResource('quotes', adminQuotes);
     for (const resource of ['stones', 'projects', 'finishes', 'services']) {
       addAdminResource(resource, adminCatalog);
     }

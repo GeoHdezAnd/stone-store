@@ -8,7 +8,6 @@ const valido = {
   origen: 'Sedimentaria',
   tipoRoca: 'Roca sedimentaria',
   colores: ['Beige', 'Crema'],
-  usos: ['Fachada', 'Sillería'],
   categoriasUso: ['fachadas', 'muros-silleria'],
   acabados: ['Labrado', 'Cepillado'],
   formatos: ['Bloque', 'Placa 60 × 40'],

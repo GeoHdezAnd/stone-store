@@ -13,7 +13,16 @@ export interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
+  /** Cabecera Accept (por defecto JSON). */
+  accept?: string;
 }
+
+/** Descarga un archivo (p. ej. CSV) con la sesión; nunca por un enlace con token. */
+export interface ApiDownloadResult {
+  blob: Blob;
+  headers: Headers;
+}
+export type ApiDownload = (path: string, options?: ApiRequestOptions) => Promise<ApiDownloadResult>;
 
 export type ApiFetch = <T = unknown>(path: string, options?: ApiRequestOptions) => Promise<T>;
 
@@ -140,16 +149,22 @@ async function toApiError(res: Response): Promise<ApiError> {
  * cabecera Authorization; jamás en la URL. Ante un 401 renueva UNA vez y reintenta UNA vez;
  * si vuelve a fallar, cierra la sesión.
  */
-export function createApiClient(deps: {
+interface ClientDeps {
   apiUrl: string;
   auth: ApiAuth;
   fetchImpl?: typeof fetch;
-}): ApiFetch {
+}
+
+/** Petición autenticada (valida la ruta, adjunta el token y reintenta una vez tras un 401). */
+function createAuthorizedRequest(deps: ClientDeps) {
   const { apiUrl, auth } = deps;
   const doFetch = deps.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
 
   async function send(path: string, token: string, options: ApiRequestOptions): Promise<Response> {
-    const headers = new Headers({ Accept: 'application/json', Authorization: `Bearer ${token}` });
+    const headers = new Headers({
+      Accept: options.accept ?? 'application/json',
+      Authorization: `Bearer ${token}`,
+    });
     const init: RequestInit = { method: options.method ?? 'GET', headers };
     if (options.body !== undefined) {
       headers.set('Content-Type', 'application/json');
@@ -166,7 +181,7 @@ export function createApiClient(deps: {
 
   const unauthorized = () => new ApiError({ status: 401, code: 'unauthorized' });
 
-  return async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  return async function request(path: string, options: ApiRequestOptions): Promise<Response> {
     assertSafePath(path);
 
     let token: string;
@@ -192,7 +207,31 @@ export function createApiClient(deps: {
       }
     }
 
+    return res;
+  };
+}
+
+export function createApiClient(deps: ClientDeps): ApiFetch {
+  const request = createAuthorizedRequest(deps);
+  return async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+    const res = await request(path, options);
     if (!res.ok) throw await toApiError(res);
     return (await readSuccessBody(res)) as T;
+  };
+}
+
+/** Descargas por blob con el mismo manejo de sesión que `createApiClient`. */
+export function createApiDownloader(deps: ClientDeps): ApiDownload {
+  const request = createAuthorizedRequest(deps);
+  return async function download(path, options = {}) {
+    const res = await request(path, options);
+    if (!res.ok) throw await toApiError(res);
+    let blob: Blob;
+    try {
+      blob = await res.blob();
+    } catch {
+      throw new ApiError({ status: res.status, code: 'network' });
+    }
+    return { blob, headers: res.headers };
   };
 }

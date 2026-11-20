@@ -11,6 +11,16 @@ import { type DeployEnv } from './config.js';
  */
 export const AUDIT_SCOPE_INDEX = 'scope-sk-index';
 
+/**
+ * Índices de `Quotes`. `byStatus`: gsi1pk = `STATUS#<estado>`, gsi1sk = `createdAt#quoteId` (lista
+ * por estado). `byDate`: gsi2pk = `QUOTE` (constante), gsi2sk = `createdAt#quoteId` (lista general
+ * por fecha). Proyección ALL: la lista y el CSV leen la solicitud completa del índice. La
+ * partición constante `QUOTE` es una partición caliente por diseño: aceptable al volumen de una
+ * cantera (≈ cientos de solicitudes al año, muy por debajo de 1000 WCU/3000 RCU por partición).
+ */
+export const QUOTES_BY_STATUS_INDEX = 'byStatus';
+export const QUOTES_BY_DATE_INDEX = 'byDate';
+
 export interface DataStackProps extends StackProps {
   readonly deploy: DeployEnv;
 }
@@ -18,7 +28,7 @@ export interface DataStackProps extends StackProps {
 /**
  * Datos del negocio en DynamoDB (on-demand: pagas por uso, casi gratis con poco tráfico).
  * Un solo índice secundario por ahora (el GSI disperso de AuditLog) y sin TTL; el resto llega con
- * las fases que lo necesiten (`Quotes` se agrega en la fase 3.3).
+ * las fases que lo necesiten (`Quotes`, con sus 2 GSI, llega en la fase 3.3).
  */
 export class DataStack extends Stack {
   public readonly stones: Table;
@@ -30,6 +40,9 @@ export class DataStack extends Stack {
   public readonly publications: Table;
   public readonly counters: Table;
   public readonly freightConfig: Table;
+  public readonly quotes: Table;
+  /** Solo con emulador: bandeja de salida de correos de desarrollo (ver `OutboxMailer`). */
+  public readonly mailOutbox?: Table;
 
   public constructor(scope: Construct, id: string, props: DataStackProps) {
     const { deploy, ...stackProps } = props;
@@ -88,5 +101,24 @@ export class DataStack extends Stack {
     // Tarifas de flete: una fila por versión inmutable (`t0001`...) y una fila puntero `ACTIVE`
     // (versión activa + última creada). La «activa única» es atómica: ver services/api/src/admin-freight.
     this.freightConfig = make('FreightConfig', string('version'));
+    // Solicitudes de cotización. Es una tabla NUEVA: CloudFormation permite crearla con 2 GSI en el
+    // mismo despliegue (el límite de un GSI por actualización aplica solo a tablas existentes).
+    // Los folios salen de `Counters` (`folio#<año>`).
+    this.quotes = make('Quotes', string('quoteId'));
+    // Bandeja de salida de correos SOLO para el emulador: Floci puede no soportar SES, así que ahí
+    // `OutboxMailer` guarda el correo renderizado (con datos de ejemplo) en esta tabla. No existe en
+    // AWS real, donde se envía con SES.
+    if (deploy.emulated) this.mailOutbox = make('MailOutbox', string('messageId'));
+    for (const [indexName, pk, sk] of [
+      [QUOTES_BY_STATUS_INDEX, 'gsi1pk', 'gsi1sk'],
+      [QUOTES_BY_DATE_INDEX, 'gsi2pk', 'gsi2sk'],
+    ] as const) {
+      this.quotes.addGlobalSecondaryIndex({
+        indexName,
+        partitionKey: string(pk),
+        sortKey: string(sk),
+        projectionType: ProjectionType.ALL,
+      });
+    }
   }
 }

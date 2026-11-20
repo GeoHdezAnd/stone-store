@@ -1,4 +1,5 @@
 import type { FreightVersionSummary } from '../api/freightApi';
+import { Tag } from '../components/Tag';
 import { DataTable } from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import { shortUser, formatDateTime } from '../lib/publishLabels';
@@ -29,8 +30,8 @@ export function VersionsList({
       header: 'Estado',
       render: (v) => (
         <span className="row-actions">
-          {v.activa ? <span className="tag tag-ink">Activa</span> : null}
-          {v.ejemplo ? <span className="tag tag-outline">Ejemplo</span> : null}
+          {v.activa ? <Tag tone="ink">Activa</Tag> : null}
+          {v.ejemplo ? <Tag>Ejemplo</Tag> : null}
         </span>
       ),
     },

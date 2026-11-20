@@ -13,6 +13,18 @@ export type ApiErrorCode =
   | 'validation_error'
   | 'invalid_reference'
   | 'copy_failed'
+  | 'send_in_progress'
+  | 'invalid_recipient'
+  | 'invalid_transition'
+  | 'quote_locked'
+  | 'quote_too_large'
+  | 'history_full'
+  | 'notes_limit'
+  | 'conflict_after_send'
+  | 'send_failed'
+  | 'mail_not_configured'
+  | 'settings_invalid'
+  | 'final_quote_incomplete'
   | 'invalid_request'
   | 'invalid_postal_code'
   | 'invalid_distance'
@@ -66,6 +78,18 @@ const KIND: Record<ApiErrorCode, ApiErrorKind> = {
   validation_error: 'validation',
   invalid_reference: 'validation',
   copy_failed: 'server',
+  send_in_progress: 'conflict',
+  invalid_recipient: 'validation',
+  invalid_transition: 'conflict',
+  quote_locked: 'conflict',
+  quote_too_large: 'conflict',
+  history_full: 'conflict',
+  notes_limit: 'conflict',
+  conflict_after_send: 'conflict',
+  send_failed: 'server',
+  mail_not_configured: 'conflict',
+  settings_invalid: 'conflict',
+  final_quote_incomplete: 'validation',
   invalid_request: 'bad_request',
   invalid_postal_code: 'bad_request',
   invalid_distance: 'bad_request',
@@ -162,6 +186,19 @@ const MESSAGES: Record<ApiErrorCode, string> = {
   too_large: 'El pedido es demasiado grande: consúltenos por WhatsApp.',
   freight_config_missing:
     'Todavía no hay una tarifa de flete activa. Carga el seed de ejemplo o guarda una versión.',
+  invalid_transition: 'Ese cambio de estado ya no es posible. Recarga la solicitud.',
+  quote_locked: 'Los precios ya no se pueden editar en el estado actual de la solicitud.',
+  quote_too_large: 'La solicitud ya es demasiado grande para guardar más cambios.',
+  history_full: 'El historial de la solicitud está lleno.',
+  notes_limit: 'La solicitud ya tiene el máximo de notas.',
+  conflict_after_send:
+    'El correo sí salió al cliente, pero la solicitud cambió y no se guardó el envío. Recarga antes de volver a enviar.',
+  send_failed: 'No se pudo enviar el correo. La solicitud no cambió; intenta de nuevo.',
+  mail_not_configured: 'El envío de correos aún no está configurado.',
+  settings_invalid: 'La configuración del correo no es válida. Revísala en Configuración.',
+  final_quote_incomplete: 'La cotización final está incompleta: captura el precio de cada piedra.',
+  send_in_progress: 'Se está enviando esta cotización. Espera unos segundos y recarga.',
+  invalid_recipient: 'El correo del cliente no es válido; corrígelo antes de enviar.',
   copy_failed:
     'La publicación se guardó, pero no se pudo actualizar la copia vigente del sitio. Vuelve a intentarlo.',
   invalid_stored_item:
@@ -187,6 +224,9 @@ const DETAIL_CODES = new Set<ApiErrorCode>([
   'thickness_not_available',
   'out_of_zone',
   'too_large',
+  'conflict_after_send',
+  'send_failed',
+  'final_quote_incomplete',
 ]);
 
 /** Mensaje en español para mostrar. No expone detalles internos ni repite datos del usuario. */

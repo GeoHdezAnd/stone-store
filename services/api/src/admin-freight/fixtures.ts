@@ -49,7 +49,6 @@ export function stoneRow(over: Record<string, unknown> = {}): Record<string, unk
     origen: 'Sedimentaria',
     tipoRoca: 'Roca sedimentaria',
     colores: ['Beige'],
-    usos: ['Fachada'],
     categoriasUso: ['fachadas'],
     acabados: ['Labrado'],
     formatos: ['Bloque'],

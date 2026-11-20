@@ -1,21 +1,9 @@
-import { freightConfigSchema } from '@canteras/shared';
-import { z } from 'zod';
+import { freightConfigPutBodySchema } from '@canteras/shared';
+import type { z } from 'zod';
 import type { FormSection } from '../components/fieldTypes';
 
-/**
- * Cuerpo de `PUT /admin/freight-config` sin `baseVersion` (lo agrega quien guarda). Refleja el
- * schema del servidor (`services/api/src/admin-freight/routes.ts`): la configuración sin lo que
- * decide el servidor, más `resumenCambio` obligatorio y `activar` opcional.
- */
-export const freightFormSchema = freightConfigSchema
-  .omit({ version: true, activa: true, creadaPor: true, creadaAt: true, resumenCambio: true })
-  .extend({
-    resumenCambio: z
-      .string({ error: 'El resumen del cambio debe ser texto' })
-      .min(1, 'El resumen del cambio es obligatorio')
-      .max(300, 'El resumen del cambio admite máximo 300 caracteres'),
-    activar: z.boolean({ error: 'activar debe ser verdadero o falso' }).optional(),
-  });
+/** Cuerpo de `PUT /admin/freight-config` sin `baseVersion` (lo agrega quien guarda). Es el mismo schema del servidor. */
+export const freightFormSchema = freightConfigPutBodySchema.omit({ baseVersion: true });
 export type FreightFormValues = z.infer<typeof freightFormSchema>;
 
 const truckColumns = [

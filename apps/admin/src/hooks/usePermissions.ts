@@ -1,3 +1,4 @@
+import { canRoleTransition } from '@canteras/shared';
 import { useAuth } from '../auth/AuthContext';
 
 /**
@@ -13,5 +14,10 @@ export function usePermissions() {
     canEditSettings: isOwner,
     canPublish: isOwner,
     canEditFreight: isOwner,
+    canExportQuotes: isOwner,
+    canSendQuote: isOwner,
+    /** Transición de estado permitida a alguno de mis roles (staff solo prepara). */
+    canTransitionTo: (from: string, to: string) =>
+      user?.roles.some((role) => canRoleTransition(role, from, to)) ?? false,
   };
 }

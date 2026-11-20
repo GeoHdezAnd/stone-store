@@ -8,6 +8,8 @@ interface ConfirmDialogProps {
   confirmLabel: string;
   cancelLabel?: string;
   busy?: boolean;
+  /** Deshabilita «Confirmar» (p. ej. falta elegir un motivo). */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -26,6 +28,7 @@ function OpenDialog({
   confirmLabel,
   cancelLabel = 'Cancelar',
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -61,7 +64,12 @@ function OpenDialog({
         >
           {cancelLabel}
         </button>
-        <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={onConfirm}
+          disabled={busy || confirmDisabled}
+        >
           {confirmLabel}
         </button>
       </div>
