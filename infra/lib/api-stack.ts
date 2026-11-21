@@ -24,10 +24,10 @@ import { type Construct } from 'constructs';
 
 import { FLOCI_API_PORT, FLOCI_IP, type DeployEnv } from './config.js';
 import { AUDIT_SCOPE_INDEX, QUOTES_BY_DATE_INDEX, QUOTES_BY_STATUS_INDEX } from './data-stack.js';
-import { validateAllowedOrigins } from './origins.js';
+import { mergeOrigins, validateAllowedOrigins, validateSiteOrigins } from './origins.js';
 
-// Se reexporta desde su módulo compartido (también lo usa MediaStack).
-export { validateAllowedOrigins };
+// Se reexportan desde su módulo compartido (validateAllowedOrigins también lo usa MediaStack).
+export { validateAllowedOrigins, validateSiteOrigins };
 
 /**
  * Tabla de DynamoDB reducida a lo que usa esta pila (ARN y nombre). Se evita `ITable`
@@ -46,6 +46,8 @@ export interface ApiTables {
   readonly publications: TableRef;
   readonly freightConfig: TableRef;
   readonly quotes: TableRef;
+  /** Contadores de folio (`folio#<año>`): solo los toca `QuotesCreate`. */
+  readonly counters: TableRef;
   /** Solo con emulador (DataStack): bandeja de salida de correos de desarrollo. */
   readonly mailOutbox?: TableRef;
 }
@@ -87,6 +89,22 @@ export interface ApiStackProps extends StackProps {
   readonly sesRecipientIdentityArns?: string[];
   /** Orígenes CORS permitidos. Obligatorio en prod; en dev por defecto el dashboard local. */
   readonly allowedOrigins?: string[];
+  /**
+   * Orígenes CORS del SITIO PÚBLICO (variable SITE_ORIGINS): se UNEN a los del dashboard solo en la
+   * API. En dev, sin valor, `http://localhost:4321`; en prod pueden faltar (misma validación https).
+   */
+  readonly siteOrigins?: string[];
+  /**
+   * Origen del dashboard (`https://admin.ejemplo.mx`, o http con localhost) para el enlace al detalle
+   * del aviso al dueño. Opcional: sin él, el aviso va sin enlace.
+   */
+  readonly adminBaseUrl?: string;
+  /**
+   * Nombre (`/ruta/nombre`) del parámetro SSM SecureString con el secreto de Cloudflare Turnstile. El
+   * dueño lo crea a mano en AWS real. Opcional: sin él (y sin emulador) `POST /quotes` falla CERRADO
+   * (503 `captcha_not_configured`). Con emulador se ignora: se usa el verificador falso.
+   */
+  readonly turnstileSecretParam?: string;
 }
 
 // Identidad de SES concreta (sin comodines).
@@ -94,6 +112,34 @@ const SES_IDENTITY_ARN_RE = /^arn:aws:ses:[a-z0-9-]+:\d{12}:identity\/[A-Za-z0-9
 
 // Claves de ruta de la subida de fotos (las emite `addAdminResource('media', ...)`).
 const MEDIA_ROUTE_KEYS = ['ANY /admin/media', 'ANY /admin/media/{proxy+}'] as const;
+
+// Ruta PÚBLICA del formulario de cotización: límite propio (1 req/s, ráfaga 2) además del de la etapa.
+const QUOTES_CREATE_ROUTE_KEY = 'POST /quotes';
+
+// Nombre jerárquico de SSM: `/a/b-c_d.e`, sin comodines, sin `//` ni barra final, máx. 1011 caracteres.
+// (Mismo criterio que `services/api/src/quotes-create/config.ts`; infra no importa código de runtime.)
+const SSM_PARAM_NAME_RE = /^\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+
+/** Origen del dashboard: https (o http solo con localhost), sin ruta, credenciales ni query. */
+function validateAdminBaseUrl(raw: string): string {
+  const fail = (): never => {
+    throw new Error(
+      'ADMIN_BASE_URL no es válida: debe ser un origen https (o http solo con localhost), sin ruta.',
+    );
+  };
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return fail();
+  }
+  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  const schemeOk = url.protocol === 'https:' || (url.protocol === 'http:' && local);
+  if (!schemeOk || !/^[a-z0-9.-]+$/i.test(url.hostname) || url.origin !== raw.replace(/\/+$/, '')) {
+    fail();
+  }
+  return url.origin;
+}
 
 // Raíz del repo (infra/lib -> ../..): las Lambdas viven en services/api.
 const REPO_ROOT = join(import.meta.dirname, '..', '..');
@@ -124,7 +170,7 @@ export function jwtIssuer(
  *
  * Denegación por defecto EN INFRAESTRUCTURA: el authorizer por defecto es JWT (Cognito), así
  * que toda ruta nueva queda protegida salvo que alguien la marque pública a propósito. Solo
- * `GET /health` es pública. No hay ruta `$default`.
+ * `GET /health` y `POST /quotes` (el formulario público) son públicas. No hay ruta `$default`.
  */
 export class ApiStack extends Stack {
   public readonly httpApi: HttpApi;
@@ -136,6 +182,7 @@ export class ApiStack extends Stack {
   public readonly adminPublishFunction: IFunction;
   public readonly adminFreightFunction: IFunction;
   public readonly adminQuotesFunction: IFunction;
+  public readonly quotesCreateFunction: IFunction;
 
   public constructor(scope: Construct, id: string, props: ApiStackProps) {
     const {
@@ -149,6 +196,9 @@ export class ApiStack extends Stack {
       sesIdentityArn,
       sesRecipientIdentityArns,
       allowedOrigins,
+      siteOrigins,
+      adminBaseUrl,
+      turnstileSecretParam,
       ...stackProps
     } = props;
     super(scope, id, stackProps);
@@ -162,7 +212,20 @@ export class ApiStack extends Stack {
     }
 
     const isProd = deploy.name === 'prod';
-    const origins = validateAllowedOrigins(deploy, allowedOrigins);
+    // Dashboard + sitio público (SITE_ORIGINS): la API sirve a los dos; el bucket de media solo al dashboard.
+    const origins = mergeOrigins(
+      validateAllowedOrigins(deploy, allowedOrigins),
+      validateSiteOrigins(deploy, siteOrigins),
+    );
+    if (
+      turnstileSecretParam !== undefined &&
+      (turnstileSecretParam.length > 1011 || !SSM_PARAM_NAME_RE.test(turnstileSecretParam))
+    ) {
+      throw new Error(
+        'TURNSTILE_SECRET_PARAM no es un nombre de parámetro SSM válido: usa /ruta/nombre, sin comodines.',
+      );
+    }
+    const adminBase = adminBaseUrl === undefined ? undefined : validateAdminBaseUrl(adminBaseUrl);
 
     const authorizer = new HttpJwtAuthorizer(
       'JwtAuthorizer',
@@ -207,8 +270,13 @@ export class ApiStack extends Stack {
     // miles de URLs prefirmadas o agote el límite de la etapa y tumbe el dashboard. `HttpStage`
     // L2 no soporta throttling por ruta: se usa el L1. Las claves son EXACTAMENTE las rutas que
     // emite `addAdminResource('media')`. Floci NO aplica throttling: solo cuenta en AWS real.
+    // Lo mismo para `POST /quotes`, que es PÚBLICA: acota el abuso (spam de solicitudes y de correos).
+    // API Gateway HTTP API no limita por IP, solo por ruta/etapa.
     (stage.node.defaultChild as CfnStage).routeSettings = Object.fromEntries(
-      MEDIA_ROUTE_KEYS.map((k) => [k, { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 }]),
+      [...MEDIA_ROUTE_KEYS, QUOTES_CREATE_ROUTE_KEY].map((k) => [
+        k,
+        { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
+      ]),
     );
 
     const makeFunction = (
@@ -569,11 +637,126 @@ export class ApiStack extends Stack {
       }),
     );
 
-    // ÚNICA ruta pública, marcada explícitamente.
+    // Formulario público de cotización (`POST /quotes`, CLAUDE.md 5.1 y 8): ruta SIN authorizer que
+    // escribe en la base y manda correos. Mínimo privilegio con sentencias explícitas (sin `grant*`):
+    // - Quotes: solo `PutItem` (crea la solicitud; no lee, consulta, actualiza ni borra).
+    // - Counters: solo `UpdateItem` y SOLO claves `folio#*` (el contador de folios).
+    // - Stones: `BatchGetItem` (las piedras pedidas, para calcular el peso en el servidor).
+    // - FreightConfig: `GetItem` (puntero ACTIVE y versión activa: de ahí sale la merma).
+    // - Settings: `GetItem` de la fila PUBLIC (remitente y patio; nunca la MAIL).
+    // - Correo: SES (`ses:SendEmail` sobre la identidad) o, con emulador, PutItem en MailOutbox.
+    // - Captcha: `ssm:GetParameter` SOLO sobre el parámetro del secreto de Turnstile y solo en AWS real.
+    // Sin AuditLog (el actor es anónimo; la solicitud misma es el registro), sin S3, sin KMS explícito
+    // (con la llave administrada `aws/ssm` la política de la llave ya lo permite; con una CMK propia
+    // habría que agregar `kms:Decrypt`). Se empaqueta TODO el SDK (versiones fijadas, SSM incluido).
+    // Floci NO aplica IAM: se verifica en AWS real.
+    const quotesCreate = makeFunction('QuotesCreate', 'quotes-create', []);
+    this.quotesCreateFunction = quotesCreate;
+    quotesCreate.addEnvironment('QUOTES_TABLE', tables.quotes.tableName);
+    quotesCreate.addEnvironment('COUNTERS_TABLE', tables.counters.tableName);
+    quotesCreate.addEnvironment('STONES_TABLE', tables.stones.tableName);
+    quotesCreate.addEnvironment('FREIGHT_CONFIG_TABLE', tables.freightConfig.tableName);
+    quotesCreate.addEnvironment('SETTINGS_TABLE', tables.settings.tableName);
+    if (adminBase !== undefined) quotesCreate.addEnvironment('ADMIN_BASE_URL', adminBase);
+    quotesCreate.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [tables.quotes.tableArn],
+      }),
+    );
+    quotesCreate.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:UpdateItem'],
+        resources: [tables.counters.tableArn],
+        // Defensa en profundidad: solo los contadores de folio (`folio#<año>`).
+        conditions: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['folio#*'] } },
+      }),
+    );
+    quotesCreate.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:BatchGetItem'],
+        resources: [tables.stones.tableArn],
+      }),
+    );
+    quotesCreate.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [tables.freightConfig.tableArn],
+      }),
+    );
+    quotesCreate.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [tables.settings.tableArn],
+        // Solo la fila PUBLIC: la MAIL (plantillas) no hace falta aquí.
+        conditions: {
+          'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': [SETTINGS_ROW_KEYS.public] },
+        },
+      }),
+    );
+    if (deploy.emulated) {
+      // Emulador: correo a la bandeja MailOutbox y verificador de captcha falso (token `test-pass`).
+      // NUNCA existe en AWS real: es lo que impide aceptar solicitudes sin verificar.
+      quotesCreate.addEnvironment('TURNSTILE_MODE', 'fake');
+      if (tables.mailOutbox) {
+        quotesCreate.addEnvironment('MAIL_TRANSPORT', 'outbox');
+        quotesCreate.addEnvironment('MAIL_OUTBOX_TABLE', tables.mailOutbox.tableName);
+        quotesCreate.addToRolePolicy(
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ['dynamodb:PutItem'],
+            resources: [tables.mailOutbox.tableArn],
+          }),
+        );
+      }
+    } else {
+      if (sesIdentityArn !== undefined) {
+        quotesCreate.addEnvironment('MAIL_TRANSPORT', 'ses');
+        quotesCreate.addToRolePolicy(
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ['ses:SendEmail'],
+            resources: [sesIdentityArn, ...(sesRecipientIdentityArns ?? [])],
+          }),
+        );
+      }
+      // Sin parámetro no hay verificador real: la ruta responde 503 `captcha_not_configured`.
+      if (turnstileSecretParam !== undefined) {
+        quotesCreate.addEnvironment('TURNSTILE_SECRET_PARAM', turnstileSecretParam);
+        quotesCreate.addToRolePolicy(
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ['ssm:GetParameter'],
+            // ARN del parámetro (`arn:aws:ssm:<región>:<cuenta>:parameter/ruta/nombre`), sin comodines.
+            resources: [
+              this.formatArn({
+                service: 'ssm',
+                resource: 'parameter',
+                resourceName: turnstileSecretParam.slice(1),
+              }),
+            ],
+          }),
+        );
+      }
+    }
+
+    // Rutas públicas, marcadas explícitamente: `GET /health` y `POST /quotes`. Cualquier otra ruta
+    // sin authorizer rompe el invariante de api-stack.test.ts.
     this.httpApi.addRoutes({
       path: '/health',
       methods: [HttpMethod.GET],
       integration: new HttpLambdaIntegration('HealthIntegration', this.healthFunction),
+      authorizer: new HttpNoneAuthorizer(),
+    });
+    this.httpApi.addRoutes({
+      path: '/quotes',
+      methods: [HttpMethod.POST],
+      integration: new HttpLambdaIntegration('QuotesCreateIntegration', quotesCreate),
       authorizer: new HttpNoneAuthorizer(),
     });
 

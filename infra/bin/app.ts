@@ -37,6 +37,22 @@ const allowedOrigins = validateAllowedOrigins(
   adminOrigins.length > 0 ? adminOrigins : undefined,
 );
 
+// Orígenes CORS del SITIO PÚBLICO (lista separada por comas en SITE_ORIGINS): se unen a los del
+// dashboard SOLO en la API (el bucket de media no los recibe). En dev, sin la variable, se usa
+// http://localhost:4321 (Astro); en prod pueden faltar, pero si se pasan deben ser https.
+const siteOrigins = (process.env['SITE_ORIGINS'] ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter((o) => o !== '');
+
+// URL del dashboard para el enlace del aviso al dueño (opcional). Se valida en ApiStack.
+const adminBaseUrl = (process.env['ADMIN_BASE_URL'] ?? '').trim();
+
+// Nombre del parámetro SSM (SecureString) con el secreto de Turnstile (opcional). El dueño lo crea a
+// mano en AWS real ANTES de `cdk diff/deploy`: `aws ssm put-parameter --type SecureString ...`. Sin él,
+// `POST /quotes` falla cerrado (503 `captcha_not_configured`). Con emulador se ignora.
+const turnstileSecretParam = (process.env['TURNSTILE_SECRET_PARAM'] ?? '').trim();
+
 // Fotos del catálogo: bucket privado al que el dashboard sube con URL prefirmada.
 const media = new MediaStack(app, `canteras-media-${deploy.name}`, {
   env,
@@ -77,6 +93,9 @@ new ApiStack(app, `canteras-api-${deploy.name}`, {
   mediaBucket: media.bucket,
   publishBucket: publish.bucket,
   ...(siteDistributionId === '' ? {} : { siteDistributionId }),
+  ...(siteOrigins.length === 0 ? {} : { siteOrigins }),
+  ...(adminBaseUrl === '' ? {} : { adminBaseUrl }),
+  ...(turnstileSecretParam === '' ? {} : { turnstileSecretParam }),
   tables: {
     stones: data.stones,
     projects: data.projects,
@@ -87,6 +106,7 @@ new ApiStack(app, `canteras-api-${deploy.name}`, {
     publications: data.publications,
     freightConfig: data.freightConfig,
     quotes: data.quotes,
+    counters: data.counters,
     ...(data.mailOutbox ? { mailOutbox: data.mailOutbox } : {}),
   },
   allowedOrigins,

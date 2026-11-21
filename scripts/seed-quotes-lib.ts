@@ -9,6 +9,7 @@ import {
   computeFinalQuote,
   computeWeightKg,
   estimateFreight,
+  folioCounterName,
   formatFolio,
   FreightError,
   freightConfigSchema,
@@ -49,8 +50,8 @@ const SEED_USER = 'seed';
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 
-/** Nombre del contador de folios de un año en la tabla `Counters` (`folio#2026`). */
-export const folioCounterName = (year: number): string => `folio#${year}`;
+// El nombre del contador vive en `packages/shared` (lo comparten este seed y `quotes-create`).
+export { folioCounterName };
 
 // De la más antigua (0) a la más reciente (29): lo viejo está más avanzado en el embudo.
 const STATUS_PLAN: readonly QuoteStatus[] = [
