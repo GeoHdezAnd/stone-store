@@ -1,0 +1,25 @@
+---
+interface Props {
+  eyebrow: string;
+  title: string;
+}
+
+const { eyebrow, title } = Astro.props;
+---
+
+<main id="contenido" class="container construction">
+  <span class="eyebrow">{eyebrow}</span>
+  <h1 class="page-title">{title}</h1>
+  <div class="construction__box">
+    <p>
+      <strong>En construcción.</strong>
+    </p>
+    <p>
+      Esta sección estará disponible pronto. Mientras tanto, puedes revisar las piedras del
+      catálogo.
+    </p>
+    <a class="btn btn-primary" href="/catalog/">
+      Ver el catálogo
+    </a>
+  </div>
+</main>

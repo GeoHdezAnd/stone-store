@@ -1,0 +1,26 @@
+---
+import { USE_CATEGORIES, USE_CATEGORY_LABELS, type UseCategory } from '@canteras/shared';
+import CatalogView from '../../components/CatalogView.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { loadCatalog } from '../../lib/catalog-loader';
+
+export function getStaticPaths() {
+  return USE_CATEGORIES.map((category) => ({ params: { category } }));
+}
+
+const category = Astro.params.category as UseCategory;
+const { catalog } = await loadCatalog();
+const stones = catalog.stones.filter((s) => s.categoriasUso.includes(category));
+const label = USE_CATEGORY_LABELS[category];
+---
+
+<BaseLayout title={`${label} | Catálogo`} description={`Piedras para ${label.toLowerCase()}.`}>
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">Catálogo</span>
+      <h1 class="page-title">{label}</h1>
+      <p class="lead">Las piedras que recomendamos para este uso.</p>
+    </section>
+    <CatalogView stones={stones} category={category} />
+  </main>
+</BaseLayout>

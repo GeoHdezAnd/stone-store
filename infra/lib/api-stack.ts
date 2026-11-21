@@ -315,11 +315,18 @@ export class ApiStack extends Stack {
     this.adminSettingsFunction = adminSettings;
     adminSettings.addEnvironment('SETTINGS_TABLE', tables.settings.tableName);
     adminSettings.addEnvironment('AUDIT_TABLE', tables.auditLog.tableName);
+    // Defensa en profundidad: solo las filas PUBLIC y MAIL (igual que AdminPublish y AdminQuotes).
+    const soloFilasDeSettings = {
+      'ForAllValues:StringEquals': {
+        'dynamodb:LeadingKeys': [SETTINGS_ROW_KEYS.public, SETTINGS_ROW_KEYS.mail],
+      },
+    };
     adminSettings.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['dynamodb:GetItem'],
         resources: [tables.settings.tableArn],
+        conditions: soloFilasDeSettings,
       }),
     );
     adminSettings.addToRolePolicy(
@@ -327,7 +334,7 @@ export class ApiStack extends Stack {
         effect: Effect.ALLOW,
         actions: ['dynamodb:PutItem'],
         resources: [tables.settings.tableArn],
-        conditions: soloEnTransaccion,
+        conditions: { ...soloEnTransaccion, ...soloFilasDeSettings },
       }),
     );
     adminSettings.addToRolePolicy(

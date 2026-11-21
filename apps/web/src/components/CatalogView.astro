@@ -1,0 +1,104 @@
+---
+import {
+  USE_CATEGORIES,
+  USE_CATEGORY_LABELS,
+  type Stone,
+  type UseCategory,
+} from '@canteras/shared';
+import { joinList, usesLabel } from '../lib/format';
+import StoneCard from './StoneCard.astro';
+
+interface Props {
+  stones: readonly Stone[];
+  /** Categoría activa; `null` = todo. */
+  category: UseCategory | null;
+}
+
+const { stones, category } = Astro.props;
+---
+
+<div class="catalog">
+  <hr class="rule" />
+  <div class="toolbar">
+    <nav aria-label="Filtrar por uso">
+      <ul>
+        <li>
+          <a
+            class="tag tag-outline"
+            href="/catalog/"
+            aria-current={category === null ? 'page' : undefined}
+          >
+            Todo
+          </a>
+        </li>
+        {USE_CATEGORIES.map((c) => (
+          <li>
+            <a
+              class="tag tag-outline"
+              href={`/catalog/${c}/`}
+              aria-current={category === c ? 'page' : undefined}
+            >
+              {USE_CATEGORY_LABELS[c]}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+    <fieldset class="seg-field">
+      <legend class="sr-only">Vista del catálogo</legend>
+      <div class="seg">
+        <label class="seg-opt">
+          <input type="radio" name="view" id="view-cards" checked />
+          Fichas
+        </label>
+        <label class="seg-opt">
+          <input type="radio" name="view" id="view-index" />
+          Índice
+        </label>
+      </div>
+    </fieldset>
+  </div>
+  <hr class="rule" />
+
+  {stones.length === 0 ? (
+    <p class="empty muted">No hay piedras publicadas para este uso por ahora.</p>
+  ) : (
+    <>
+      <ul class="grid grid--catalog view--cards">
+        {stones.map((s) => (
+          <li>
+            <StoneCard stone={s} />
+          </li>
+        ))}
+      </ul>
+      <div class="view--index">
+        <table class="table" style="min-width: 640px">
+          <thead>
+            <tr>
+              <th scope="col">Piedra</th>
+              <th scope="col">Origen</th>
+              <th scope="col">Color</th>
+              <th scope="col">Usos</th>
+              <th scope="col">Acabados</th>
+              <th scope="col">Formato</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stones.map((s) => (
+              <tr>
+                <th scope="row">
+                  <a href={`/stones/${s.id}/`}>{s.nombre}</a>
+                </th>
+                <td>{s.origen}</td>
+                <td>{joinList(s.colores)}</td>
+                <td>{usesLabel(s)}</td>
+                <td>{joinList(s.acabados)}</td>
+                <td>{joinList(s.formatos)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+</div>

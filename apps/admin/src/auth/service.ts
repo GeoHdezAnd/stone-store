@@ -263,6 +263,10 @@ export function createAuthService(config: AuthConfig): AuthService {
         /* best-effort: lo importante es la limpieza local */
       } finally {
         if (timer !== undefined) clearTimeout(timer);
+        // Segundo incremento: una operación que EMPEZÓ durante el cierre (la UI sigue montada
+        // hasta 5 s) tomó el epoch del primer incremento y no estaba en `pending`; sin esto
+        // terminaría después de la limpieza y resucitaría la sesión.
+        epoch += 1;
         clearLocal(user);
         setState(SIGNED_OUT);
       }

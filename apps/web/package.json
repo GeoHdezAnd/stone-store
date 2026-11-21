@@ -1,0 +1,21 @@
+{
+  "name": "@canteras/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro check && astro build",
+    "typecheck": "astro check",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@canteras/shared": "0.0.0",
+    "@canteras/ui": "0.0.0",
+    "astro": "7.4.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12"
+  }
+}

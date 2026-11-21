@@ -942,7 +942,7 @@ describe('ApiStack: Lambda AdminSettings', () => {
       const ids = tablasDeSentencia(dt, s);
       expect(ids, 'una sola tabla por sentencia').toHaveLength(1);
       const [tabla] = ids;
-      if (s['Condition'] === undefined) {
+      if (lista(s['Action']).includes('dynamodb:GetItem')) {
         lectura.push(s);
         expect(tabla).toBe(settings);
       } else if (tabla === settings) escrituraSettings.push(s);
@@ -950,13 +950,21 @@ describe('ApiStack: Lambda AdminSettings', () => {
       else throw new Error(`sentencia sobre una tabla inesperada: ${String(tabla)}`);
     }
 
-    // Lectura: SOLO GetItem (sin Scan, BatchGetItem ni Query) y sin condición.
+    // Defensa en profundidad: solo las filas PUBLIC y MAIL, como en AdminPublish y AdminQuotes.
+    const SOLO_FILAS_CONOCIDAS = {
+      'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC', 'MAIL'] },
+    };
+    // Lectura: SOLO GetItem (sin Scan, BatchGetItem ni Query), limitada a esas dos filas.
     expect(lectura).toHaveLength(1);
     expect(lista(lectura[0]!['Action'])).toEqual(['dynamodb:GetItem']);
-    // Escritura de Settings: SOLO PutItem, dentro de una transacción.
+    expect(lectura[0]!['Condition']).toEqual(SOLO_FILAS_CONOCIDAS);
+    // Escritura de Settings: SOLO PutItem, dentro de una transacción y solo esas dos filas.
     expect(escrituraSettings).toHaveLength(1);
     expect(lista(escrituraSettings[0]!['Action'])).toEqual(['dynamodb:PutItem']);
-    expect(escrituraSettings[0]!['Condition']).toEqual(CONDICION_TRANSACCION);
+    expect(escrituraSettings[0]!['Condition']).toEqual({
+      ...CONDICION_TRANSACCION,
+      ...SOLO_FILAS_CONOCIDAS,
+    });
     // Auditoría append-only: SOLO PutItem, dentro de una transacción.
     expect(escrituraAudit).toHaveLength(1);
     expect(lista(escrituraAudit[0]!['Action'])).toEqual(['dynamodb:PutItem']);

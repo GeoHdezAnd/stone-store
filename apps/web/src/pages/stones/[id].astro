@@ -1,0 +1,113 @@
+---
+import { USE_CATEGORY_LABELS, stoneWeightKgPerM2 } from '@canteras/shared';
+import Photo from '../../components/Photo.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { loadCatalog } from '../../lib/catalog-loader';
+import { joinList, soldByLabel, thicknessLabel } from '../../lib/format';
+
+export async function getStaticPaths() {
+  const { catalog } = await loadCatalog();
+  return catalog.stones.map((stone) => ({ params: { id: stone.id }, props: { stone } }));
+}
+
+const { stone } = Astro.props;
+const { catalog } = await loadCatalog();
+const related = catalog.projects.filter((p) => stone.proyectosRelacionados.includes(p.id));
+const [main, ...rest] = stone.fotos;
+const thumbs = rest.slice(0, 4);
+
+const specs: [string, string][] = [
+  ['Formatos', joinList(stone.formatos)],
+  ['Espesores', thicknessLabel(stone.espesoresCm)],
+  ['Colores', joinList(stone.colores)],
+  ['Usos', joinList(stone.categoriasUso.map((c) => USE_CATEGORY_LABELS[c]))],
+  ['Se vende por', soldByLabel(stone)],
+  ...(stone.vendidaPor.includes('m2')
+    ? ([['Peso aprox.', `${stoneWeightKgPerM2(stone, 5)} kg por m² a 5 cm`]] as [string, string][])
+    : []),
+  ['Absorción', `${stone.absorcionPct} %`],
+  ['Existencia', stone.existencia],
+  ['Entrega', `${stone.entregaDias} días hábiles según volumen`],
+];
+---
+
+<BaseLayout title={stone.nombre} description={stone.descripcion.slice(0, 150)}>
+  <main id="contenido" class="container">
+    <p class="crumbs">
+      <a href="/catalog/">Catálogo</a> / {stone.nombre}
+    </p>
+
+    <div class="stone">
+      <div class="stone__gallery">
+        <Photo
+          photoKey={main}
+          alt={`Foto de ${stone.nombre}`}
+          ratio="5 / 4"
+          sizes="(min-width: 960px) 50vw, 100vw"
+          eager
+        />
+        {thumbs.length > 0 && (
+          <div class="thumbs">
+            {thumbs.map((key, i) => (
+              <Photo photoKey={key} alt={`${stone.nombre}, foto ${i + 2}`} ratio="1" sizes="12vw" />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <span class="eyebrow">{stone.tipoRoca} · San Salvador el Seco, Puebla</span>
+        <h1>{stone.nombre}</h1>
+        <p class="stone__desc">{stone.descripcion}</p>
+
+        <h2 class="label">Acabados disponibles</h2>
+        <ul class="chips">
+          {stone.acabados.map((a) => (
+            <li class="tag tag-neutral">{a}</li>
+          ))}
+        </ul>
+
+        <table class="table specs" style="margin-top: 28px">
+          <tbody>
+            {specs.map(([k, v]) => (
+              <tr>
+                <th scope="row">{k}</th>
+                <td>{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div class="btn-row">
+          <button
+            type="button"
+            class="btn btn-primary"
+            disabled
+            aria-describedby="quote-hint"
+            data-stone-id={stone.id}
+          >
+            Agregar a cotización
+          </button>
+          <a class="btn btn-ghost" href="/contact/">
+            Preguntar por esta piedra
+          </a>
+        </div>
+        <p class="note" id="quote-hint">
+          La lista de cotización estará disponible pronto. Los precios se cotizan por proyecto:
+          dependen del volumen, el corte y el flete.
+        </p>
+
+        {related.length > 0 && (
+          <>
+            <h2 class="label">Se usó en</h2>
+            <ul class="plain-list">
+              {related.map((p) => (
+                <li>{p.titulo}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </div>
+  </main>
+</BaseLayout>

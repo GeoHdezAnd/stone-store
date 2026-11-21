@@ -1,0 +1,48 @@
+---
+// Por ahora el contador de cotización siempre es 0: la lista real (localStorage) es otra tarea.
+const quoteCount = 0;
+
+const links = [
+  { href: '/services/', label: 'Servicios' },
+  { href: '/catalog/', label: 'Piedras' },
+  { href: '/finishes/', label: 'Acabados' },
+  { href: '/projects/', label: 'Proyectos' },
+  { href: '/about/', label: 'La cantera' },
+  { href: '/contact/', label: 'Contacto' },
+];
+
+const path = Astro.url.pathname;
+// Las fichas de piedra (/stones/...) cuelgan de «Piedras».
+const current = (href: string) => {
+  const prefixes = href === '/catalog/' ? [href, '/stones/'] : [href];
+  return prefixes.some((p) => path.startsWith(p)) ? 'page' : undefined;
+};
+---
+
+<header class="site-header">
+  <div class="container site-header__bar">
+    <a class="brand" href="/">
+      CANTERAS NATURALES
+    </a>
+    <nav class="nav-links" aria-label="Principal">
+      {links.map((l) => (
+        <a href={l.href} aria-current={current(l.href)}>
+          {l.label}
+        </a>
+      ))}
+    </nav>
+    <a class="btn btn-primary" href="/contact/">
+      Cotización · {quoteCount}
+    </a>
+    <details class="menu">
+      <summary>Menú</summary>
+      <nav class="menu__list" aria-label="Principal (móvil)">
+        {links.map((l) => (
+          <a href={l.href} aria-current={current(l.href)}>
+            {l.label}
+          </a>
+        ))}
+      </nav>
+    </details>
+  </div>
+</header>

@@ -1,0 +1,24 @@
+---
+import CatalogView from '../../components/CatalogView.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { loadCatalog } from '../../lib/catalog-loader';
+
+const { catalog } = await loadCatalog();
+---
+
+<BaseLayout
+  title="Catálogo de piedras"
+  description="Piedra natural por uso: pisos, fachadas, cocinas, escultura, exteriores y muros."
+>
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">Catálogo</span>
+      <h1 class="page-title">Piedra por uso</h1>
+      <p class="lead">
+        Cada piedra se comporta distinto según dónde va. Empieza por el uso y te mostramos
+        únicamente lo que aguanta ahí.
+      </p>
+    </section>
+    <CatalogView stones={catalog.stones} category={null} />
+  </main>
+</BaseLayout>

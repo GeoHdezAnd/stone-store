@@ -1,0 +1,43 @@
+---
+import { mediaSrcSet, mediaUrl } from '../lib/media';
+
+interface Props {
+  /** Clave de S3 (`stones/<id>/<archivo>.jpg`); sin clave se muestra el placeholder. */
+  photoKey?: string | null | undefined;
+  /** Texto alternativo. Vacío = foto decorativa (el nombre ya está como texto al lado). */
+  alt?: string;
+  /** Proporción CSS, p. ej. `4 / 5`. */
+  ratio?: string;
+  sizes?: string;
+  eager?: boolean;
+}
+
+const {
+  photoKey,
+  alt = '',
+  ratio = '4 / 3',
+  sizes = '(min-width: 960px) 25vw, 50vw',
+  eager = false,
+} = Astro.props;
+---
+
+<div class="photo grayscale" style={`aspect-ratio: ${ratio}`}>
+  {photoKey ? (
+    <img
+      src={mediaUrl(photoKey)}
+      srcset={mediaSrcSet(photoKey)}
+      sizes={sizes}
+      alt={alt}
+      loading={eager ? 'eager' : 'lazy'}
+      decoding="async"
+    />
+  ) : alt ? (
+    <div class="photo__empty" role="img" aria-label={`${alt} (foto próximamente)`}>
+      <span aria-hidden="true">Foto próximamente</span>
+    </div>
+  ) : (
+    <div class="photo__empty" aria-hidden="true">
+      Foto próximamente
+    </div>
+  )}
+</div>

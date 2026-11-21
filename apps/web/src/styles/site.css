@@ -1,0 +1,542 @@
+/* Estilos del sitio público. Los tokens y componentes base (.btn, .tag, .seg, .table) vienen de
+   @canteras/ui/styles.css; aquí solo va el layout propio de apps/web. */
+
+:root {
+  /* Texto secundario: 72 % del texto sobre el fondo da más de 4.5:1 (el 60 % del diseño no). */
+  --muted: color-mix(in srgb, var(--color-text) 72%, transparent);
+  --gutter: clamp(16px, 5vw, 64px);
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  text-wrap: pretty;
+}
+
+a {
+  color: var(--color-accent-700);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--color-accent-800);
+  text-decoration: underline;
+}
+input[type='radio'] {
+  accent-color: var(--color-accent-700);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -64px;
+  z-index: 50;
+  background: var(--color-bg);
+  padding: 8px 12px;
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-inline: var(--gutter);
+}
+.rule {
+  height: 2px;
+  border: 0;
+  margin: 0;
+  background: var(--color-divider);
+}
+.section {
+  padding-block: clamp(40px, 6vw, 56px) clamp(48px, 7vw, 64px);
+}
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+.eyebrow {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+.lead {
+  font-size: 17px;
+  line-height: 28px;
+  max-width: 58ch;
+  margin: 24px 0 0;
+}
+.page-title {
+  font-size: clamp(32px, 4.4vw, 60px);
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  margin: 14px 0 0;
+}
+.page-head {
+  padding-block: clamp(40px, 6vw, 56px) 24px;
+}
+.muted {
+  color: var(--muted);
+}
+.btn-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 28px;
+}
+
+/* Botones y etiquetas con el acento oscuro #ae1800 (el --color-accent del diseño no llega a 4.5:1). */
+.btn-ghost {
+  color: var(--color-accent-700);
+}
+.tag-outline {
+  border-color: var(--color-accent-700);
+  color: var(--color-accent-700);
+  text-decoration: none;
+}
+a.tag-outline:hover {
+  background: var(--color-accent-100);
+  text-decoration: none;
+}
+.tag-outline[aria-current='page'] {
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+}
+a.btn,
+a.btn:hover {
+  text-decoration: none;
+}
+a.btn-primary,
+a.btn-primary:hover {
+  color: var(--color-bg);
+}
+
+/* Encabezado */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--color-bg);
+  border-bottom: 2px solid var(--color-divider);
+}
+.site-header__bar {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 2vw, 28px);
+  min-height: 56px;
+  padding-block: 8px;
+}
+.brand {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: clamp(15px, 2vw, 18px);
+  letter-spacing: -0.02em;
+  color: inherit;
+  margin-right: auto;
+}
+.brand:hover {
+  color: inherit;
+  text-decoration: none;
+}
+.nav-links {
+  display: none;
+  align-items: center;
+  gap: clamp(14px, 2vw, 28px);
+  font-size: 14px;
+}
+.nav-links a,
+.menu__list a {
+  color: inherit;
+}
+.nav-links a[aria-current='page'],
+.menu__list a[aria-current='page'] {
+  color: var(--color-accent-700);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+.menu {
+  position: static;
+}
+.menu > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 8px;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 14px;
+  color: var(--color-accent-700);
+}
+.menu > summary::-webkit-details-marker {
+  display: none;
+}
+.menu__list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border-bottom: 2px solid var(--color-divider);
+}
+.menu__list a {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  padding-inline: var(--gutter);
+  font-size: 16px;
+  border-top: 2px solid var(--color-divider);
+}
+@media (min-width: 960px) {
+  .nav-links {
+    display: flex;
+  }
+  .menu {
+    display: none;
+  }
+}
+
+/* Pie */
+.site-footer {
+  border-top: 2px solid var(--color-divider);
+  padding-block: 40px;
+  font-size: 14px;
+}
+.site-footer__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 32px;
+}
+.site-footer h2 {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.site-footer p {
+  margin: 0 0 6px;
+}
+
+/* Portada */
+.hero {
+  padding-block: clamp(48px, 9vw, 104px) clamp(40px, 7vw, 76px);
+}
+.hero h1 {
+  font-size: clamp(38px, 6.2vw, 86px);
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  margin: 0 0 0 -0.058em;
+}
+.hero h1 span {
+  display: block;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 32px;
+  padding-block: 44px;
+  margin: 0;
+}
+.stats dt {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: clamp(30px, 3.4vw, 46px);
+  line-height: 1.1;
+  color: var(--color-accent-700);
+  order: 1;
+}
+.stats dd {
+  margin: 12px 0 0;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  order: 2;
+}
+.stats > div {
+  display: flex;
+  flex-direction: column;
+}
+.cta-band {
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+}
+.cta-band__inner {
+  padding-block: clamp(56px, 8vw, 84px);
+}
+.cta-band h2 {
+  font-size: clamp(32px, 4.2vw, 56px);
+  line-height: 1.06;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+.cta-band h2 span {
+  display: block;
+}
+.cta-band a {
+  color: var(--color-bg);
+  text-decoration: underline;
+}
+
+/* Tarjetas y cuadrículas */
+.grid {
+  display: grid;
+  gap: 28px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.grid--stones {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+.grid--catalog {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 32px;
+  padding-block: 32px 80px;
+}
+.grid--text {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 32px;
+}
+.grid--finishes {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 16px;
+}
+.grid--projects {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: inherit;
+  height: 100%;
+}
+.tile:hover {
+  color: inherit;
+  text-decoration: none;
+}
+.tile:hover .tile__name {
+  color: var(--color-accent-700);
+}
+.tile__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  border-top: 2px solid var(--color-divider);
+  padding-top: 8px;
+}
+.tile__name {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.tile__meta {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tile__sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+.text-card {
+  border-top: 2px solid var(--color-divider);
+  padding-top: 10px;
+}
+.text-card h3 {
+  font-size: 22px;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+.text-card p {
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
+/* Fotos */
+.photo {
+  position: relative;
+  width: 100%;
+  background: var(--color-neutral-200);
+  overflow: hidden;
+}
+.photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.photo__empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-neutral-800);
+}
+
+/* Catálogo: filtro por uso (enlaces a páginas estáticas) y vistas Fichas / Índice sin JS. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: 24px;
+}
+.toolbar ul {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.toolbar .tag {
+  min-height: 32px;
+  padding-inline: 12px;
+  font-size: 13px;
+}
+.view--index {
+  display: none;
+  overflow-x: auto;
+  padding-block: 20px 80px;
+}
+.catalog:has(#view-index:checked) .view--index {
+  display: block;
+}
+.catalog:has(#view-index:checked) .view--cards {
+  display: none;
+}
+.seg-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.empty {
+  padding-block: 48px 80px;
+}
+
+/* Ficha de piedra */
+.crumbs {
+  font-size: 13px;
+  margin: 0;
+  padding-top: 20px;
+  color: var(--muted);
+}
+.stone {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: clamp(28px, 4vw, 56px);
+  padding-block: 28px 72px;
+  align-items: start;
+}
+.stone__gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.thumbs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.stone h1 {
+  font-size: clamp(32px, 3.6vw, 50px);
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  margin: 16px 0 0 -0.058em;
+}
+.stone__desc {
+  font-size: 16px;
+  line-height: 26px;
+  margin: 20px 0 0;
+}
+.label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 32px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--color-divider);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.specs th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--muted);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-divider);
+  white-space: nowrap;
+}
+.note {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--muted);
+  margin: 16px 0 0;
+}
+.plain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 15px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Páginas «En construcción» */
+.construction {
+  padding-block: clamp(40px, 6vw, 56px) 96px;
+}
+.construction__box {
+  margin-top: 32px;
+  padding: 32px;
+  background: var(--color-surface);
+  border-left: 4px solid var(--color-accent-700);
+  max-width: 60ch;
+}
+.construction__box p:last-child {
+  margin-bottom: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}

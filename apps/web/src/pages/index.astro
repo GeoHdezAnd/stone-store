@@ -1,0 +1,175 @@
+---
+import Photo from '../components/Photo.astro';
+import StoneCard from '../components/StoneCard.astro';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { loadCatalog } from '../lib/catalog-loader';
+
+const { catalog } = await loadCatalog();
+const featured = catalog.stones.slice(0, 4);
+const services = catalog.services.slice(0, 3);
+const finishes = catalog.finishes.slice(0, 6);
+const projects = catalog.projects.slice(0, 3);
+
+// Cifras calculadas del catálogo publicado (no se inventan datos del negocio).
+const stats = [
+  { value: String(catalog.stones.length), label: 'Piedras en catálogo' },
+  { value: String(catalog.finishes.length), label: 'Acabados' },
+  { value: String(catalog.services.length), label: 'Servicios' },
+  { value: '48 h', label: 'Respuesta a cotizaciones' },
+];
+---
+
+<BaseLayout title="Piedra natural de San Salvador el Seco">
+  <main id="contenido">
+    <div class="container">
+      <section class="hero">
+        <h1>
+          <span>Piedra natural</span>
+          <span>de San Salvador el Seco.</span>
+        </h1>
+        <p class="lead">
+          Extraemos y labramos piedra en Puebla: arenisca, caliza, recinto y cantera en bloque, laja
+          y pieza labrada. Vendemos material a granel para cocinas y fachadas, y piezas terminadas
+          listas para instalar.
+        </p>
+        <div class="btn-row">
+          <a class="btn btn-primary" href="/catalog/">
+            Ver el catálogo
+          </a>
+          <a class="btn btn-ghost" href="/contact/">
+            Pedir cotización
+          </a>
+        </div>
+      </section>
+
+      <hr class="rule" />
+      <dl class="stats">
+        {stats.map((s) => (
+          <div>
+            <dt>{s.value}</dt>
+            <dd>{s.label}</dd>
+          </div>
+        ))}
+      </dl>
+      <hr class="rule" />
+
+      {services.length > 0 && (
+        <section class="section" aria-labelledby="h-services">
+          <div class="section-head">
+            <h2 class="eyebrow" id="h-services">
+              Qué hacemos
+            </h2>
+            <a href="/services/">Todos los servicios →</a>
+          </div>
+          <div class="grid grid--text">
+            {services.map((s) => (
+              <div class="text-card">
+                <h3>{s.titulo}</h3>
+                <p>{s.descripcion}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {featured.length > 0 && (
+        <>
+          <hr class="rule" />
+          <section class="section" aria-labelledby="h-stones">
+            <div class="section-head">
+              <h2 class="eyebrow" id="h-stones">
+                Piedras de la casa
+              </h2>
+              <a href="/catalog/">Ver las {catalog.stones.length} piedras →</a>
+            </div>
+            <ul class="grid grid--stones">
+              {featured.map((s) => (
+                <li>
+                  <StoneCard stone={s} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )}
+
+      {finishes.length > 0 && (
+        <>
+          <hr class="rule" />
+          <section class="section" aria-labelledby="h-finishes">
+            <div class="section-head">
+              <h2 class="eyebrow" id="h-finishes">
+                Acabados
+              </h2>
+              <a href="/finishes/">Todos los acabados →</a>
+            </div>
+            <p class="lead" style="margin: 0 0 24px">
+              La misma piedra cambia por completo según cómo se labre la cara.
+            </p>
+            <ul class="grid grid--finishes">
+              {finishes.map((f) => (
+                <li>
+                  <a class="tile" href="/finishes/">
+                    <Photo photoKey={f.foto} ratio="1" sizes="150px" />
+                    <span class="tile__row">
+                      <span class="tile__sub">{f.nombre}</span>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )}
+
+      {projects.length > 0 && (
+        <>
+          <hr class="rule" />
+          <section class="section" aria-labelledby="h-projects">
+            <div class="section-head">
+              <h2 class="eyebrow" id="h-projects">
+                Obras con nuestra piedra
+              </h2>
+              <a href="/projects/">Todos los proyectos →</a>
+            </div>
+            <ul class="grid grid--projects">
+              {projects.map((p) => (
+                <li>
+                  <a class="tile" href="/projects/">
+                    <Photo
+                      photoKey={p.fotos[0]}
+                      ratio="16 / 10"
+                      sizes="(min-width: 960px) 33vw, 100vw"
+                    />
+                    <span class="text-card">
+                      <h3>{p.titulo}</h3>
+                      <p>
+                        {p.ubicacion} · {p.anio}
+                      </p>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )}
+    </div>
+
+    <section class="cta-band" aria-labelledby="h-cta">
+      <div class="container cta-band__inner">
+        <h2 id="h-cta">
+          <span>Trae tus planos.</span>
+          <span>Te cotizamos la piedra.</span>
+        </h2>
+        <p class="lead">
+          Escoge la piedra frente al bloque, no en una foto. Horario del patio:{' '}
+          {catalog.settings.horario}.
+        </p>
+        <div class="btn-row">
+          <a href="/contact/">Agendar visita al patio</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</BaseLayout>

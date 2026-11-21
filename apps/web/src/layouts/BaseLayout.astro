@@ -1,0 +1,63 @@
+---
+import '@canteras/ui/fonts.css';
+import '@canteras/ui/styles.css';
+import '../styles/site.css';
+import SiteHeader from '../components/SiteHeader.astro';
+import { loadCatalog } from '../lib/catalog-loader';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const {
+  title,
+  description = 'Piedra natural de San Salvador el Seco, Puebla: catálogo y cotización.',
+} = Astro.props;
+const { catalog } = await loadCatalog();
+const { settings } = catalog;
+---
+
+<!doctype html>
+<html lang="es-MX">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} | Canteras Naturales</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#f3f2f2" />
+  </head>
+  <body>
+    <a class="skip-link" href="#contenido">
+      Ir al contenido
+    </a>
+    <SiteHeader />
+    <slot />
+    <footer class="site-footer">
+      <div class="container site-footer__grid">
+        <div>
+          <h2>{settings.nombrePatio}</h2>
+          <p>{settings.direccion}</p>
+          <p>{settings.horario}</p>
+        </div>
+        <div>
+          <h2>Contacto</h2>
+          <p>
+            <a href={`https://wa.me/${settings.whatsapp}`} rel="noopener">
+              Escribir por WhatsApp
+            </a>
+          </p>
+          <p>
+            <a href="/contact/">Pedir cotización</a>
+          </p>
+        </div>
+        <div>
+          <h2>Proyecto académico</h2>
+          <p class="muted">
+            Canteras Naturales es un negocio ficticio. Los datos, precios y fotos son de ejemplo.
+          </p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

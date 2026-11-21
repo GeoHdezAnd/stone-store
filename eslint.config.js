@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import astro from 'eslint-plugin-astro';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -82,8 +83,10 @@ export default tseslint.config(
     rules: restrict(workspace, apps, services, infra, aws, cdk),
   },
   // apps/*: sin SDK de AWS, sin runtime de services, sin CDK.
-  // Nota: los archivos .astro necesitan eslint-plugin-astro; se agrega al crear apps/web (fase 4).
   { files: [`apps/**/*.${EXT}`], rules: restrict(aws, services, infra, cdk) },
+  // Archivos .astro (apps/web): parser y reglas de eslint-plugin-astro, con las mismas restricciones.
+  ...astro.configs.recommended,
+  { files: ['apps/**/*.astro'], rules: restrict(aws, services, infra, cdk) },
   // services/* y scripts/*: pueden usar shared y el SDK de AWS; no apps, infra ni CDK.
   { files: [`services/**/*.${EXT}`, `scripts/**/*.${EXT}`], rules: restrict(apps, infra, cdk) },
   // infra: solo CDK; sin runtime de services, sin apps, sin clientes del SDK de AWS.
