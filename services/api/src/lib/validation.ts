@@ -12,6 +12,22 @@ function formatPath(path: readonly PropertyKey[]): string {
   return out;
 }
 
+const ZOD_ENGLISH_RE = /^(?:Invalid|Too (?:big|small)|Unrecognized|Input|Duplicate|Expected)\b/;
+
+function spanishFor(code: ZodError['issues'][number]['code']): string {
+  switch (code) {
+    case 'invalid_type':
+      return 'El campo no tiene el tipo esperado';
+    case 'too_big':
+    case 'too_small':
+      return 'El valor está fuera de los límites permitidos';
+    case 'invalid_format':
+      return 'El valor no tiene el formato esperado';
+    default:
+      return 'El valor no es válido';
+  }
+}
+
 // Los mensajes de zod ya vienen en español (los define packages/shared). Se sustituyen los que
 // de otro modo mencionarían nombres de claves enviadas por el cliente o saldrían en inglés.
 function toIssue(issue: ZodError['issues'][number]): { path: string; message: string } {
@@ -20,6 +36,12 @@ function toIssue(issue: ZodError['issues'][number]): { path: string; message: st
   }
   if (issue.code === 'invalid_type' && issue.path.length === 0) {
     return { path: '', message: 'El cuerpo debe ser un objeto JSON' };
+  }
+  // Mensajes por defecto de zod (en inglés): salen cuando el esquema no define uno propio, p. ej. un
+  // objeto que llega como arreglo (`Invalid input: expected object, received array`). Se traducen
+  // por tipo de error y sin repetir lo recibido.
+  if (ZOD_ENGLISH_RE.test(issue.message)) {
+    return { path: formatPath(issue.path), message: spanishFor(issue.code) };
   }
   return { path: formatPath(issue.path), message: issue.message };
 }

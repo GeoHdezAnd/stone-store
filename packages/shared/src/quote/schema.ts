@@ -3,6 +3,7 @@ import { text, textOrEmpty } from '../catalog/common';
 import { SOLD_BY_UNITS } from '../catalog/stone';
 import { MAX_ITEMS, MAX_ITEM_QUANTITY } from '../freight/weight';
 import { QuoteStatusSchema } from '../quote-status';
+import { MAX_FOLIO_NUMBER } from './folio';
 import { ULID_PATTERN } from './ulid';
 
 // Solicitud de cotización (CLAUDE.md 6.2 `Quotes`, 5.4 y 5.5). Dominio puro.
@@ -26,11 +27,11 @@ export const DEFAULT_VIGENCIA_DIAS = 15;
 /** Vigencia lógica del candado de envío: pasado este tiempo un envío colgado se puede reintentar. */
 export const SEND_LOCK_TTL_MS = 5 * 60 * 1000;
 
-export const FOLIO_PATTERN = /^CN-\d{4}-\d{5}$/;
+export const FOLIO_PATTERN = /^CN-\d{4}-(?:\d{5}|[1-9]\d{5})$/;
 
 export function formatFolio(year: number, n: number): string {
   if (!Number.isInteger(year) || year < 2000 || year > 9999) throw new RangeError('Año inválido.');
-  if (!Number.isInteger(n) || n < 1 || n > 99_999)
+  if (!Number.isInteger(n) || n < 1 || n > MAX_FOLIO_NUMBER)
     throw new RangeError('Número de folio inválido.');
   return `CN-${year}-${String(n).padStart(5, '0')}`;
 }

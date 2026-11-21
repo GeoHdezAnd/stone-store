@@ -73,6 +73,60 @@ describe('TurnstileVerifier', () => {
     expect(calls[0]!.init.redirect).toBe('error');
   });
 
+  describe('hostname de la respuesta (el widget se resolvió en NUESTRO sitio)', () => {
+    const verify = async (body: unknown, allowedHostnames?: string[]) => {
+      const { fetch } = fakeFetch(ok(body));
+      return make(fetch, allowedHostnames === undefined ? {} : { allowedHostnames }).verify({
+        token: 't',
+      });
+    };
+
+    it('hostname dentro de la lista: pasa (sin distinguir mayúsculas)', async () => {
+      expect(await verify({ success: true, hostname: 'sitio.example' }, ['sitio.example'])).toBe(
+        true,
+      );
+      expect(await verify({ success: true, hostname: 'SITIO.Example' }, ['sitio.example'])).toBe(
+        true,
+      );
+      expect(
+        await verify({ success: true, hostname: 'localhost' }, ['sitio.example', 'localhost']),
+      ).toBe(true);
+    });
+
+    it('hostname de OTRO sitio (token resuelto en una página del atacante): falla cerrado', async () => {
+      expect(await verify({ success: true, hostname: 'evil.example' }, ['sitio.example'])).toBe(
+        false,
+      );
+      expect(
+        await verify({ success: true, hostname: 'sitio.example.evil.example' }, ['sitio.example']),
+      ).toBe(false);
+      expect(await verify({ success: true, hostname: '' }, ['sitio.example'])).toBe(false);
+    });
+
+    it('hostname presente pero que no es texto: falla cerrado', async () => {
+      for (const hostname of [null, 5, ['sitio.example'], {}]) {
+        expect(await verify({ success: true, hostname }, ['sitio.example']), String(hostname)).toBe(
+          false,
+        );
+      }
+    });
+
+    it('si el campo no viene, no se exige (Cloudflare no siempre lo manda)', async () => {
+      expect(await verify({ success: true }, ['sitio.example'])).toBe(true);
+    });
+
+    it('sin lista configurada no se valida el hostname', async () => {
+      expect(await verify({ success: true, hostname: 'cualquiera.example' })).toBe(true);
+      expect(await verify({ success: true, hostname: 'cualquiera.example' }, [])).toBe(true);
+    });
+
+    it('success:false sigue fallando aunque el hostname coincida', async () => {
+      expect(await verify({ success: false, hostname: 'sitio.example' }, ['sitio.example'])).toBe(
+        false,
+      );
+    });
+  });
+
   describe('falla CERRADO', () => {
     it.each([
       ['success:false', { success: false, 'error-codes': ['invalid-input-response'] }],
@@ -263,6 +317,26 @@ describe('createCaptchaVerifier', () => {
 
   it('sin modo fake ni parámetro: null (la ruta falla cerrado)', () => {
     expect(createCaptchaVerifier({}, deps)).toBeNull();
+  });
+
+  it('con parámetro y hostnames permitidos: el verificador real los aplica', async () => {
+    const fetch: FetchLike = async () => ({
+      ok: true,
+      json: async () => ({ success: true, hostname: 'evil.example' }),
+    });
+    const v = createCaptchaVerifier(
+      { turnstileSecretParam: '/a/b', turnstileAllowedHostnames: ['sitio.example'] },
+      { ...deps, fetch },
+    );
+    expect(await v!.verify({ token: 't' })).toBe(false);
+  });
+
+  it('modo fake: ignora los hostnames (no habla con Turnstile)', async () => {
+    const v = createCaptchaVerifier(
+      { turnstileMode: 'fake', turnstileAllowedHostnames: ['sitio.example'] },
+      deps,
+    );
+    expect(await v!.verify({ token: 'test-pass' })).toBe(true);
   });
 
   it('no crea el cliente de SSM en modo fake ni sin parámetro', () => {

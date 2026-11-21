@@ -3,13 +3,20 @@ import {
   buildNewQuote,
   buildOwnerNotificationEmail,
   createQuoteRequestSchema,
+  emailRateKey,
   folioYear,
   formatFolio,
   freightConfigSchema,
   generateUlid,
+  ipRateKey,
   MAX_FOLIO_NUMBER,
+  MAX_QUOTES_PER_EMAIL_PER_DAY,
+  MAX_QUOTES_PER_IP_PER_DAY,
   NewQuoteError,
+  normalizeEmailForRate,
   publicSettingsSchema,
+  rateLimitExpiresAt,
+  secondsUntilNextRateLimitDay,
   stoneSchema,
   type PublicSettings,
   type Quote,
@@ -20,6 +27,7 @@ import { HttpError, jsonResponse } from '../lib/http';
 import { createLogger, type Logger, type LogSink } from '../lib/logger';
 import type { Mailer, MailMessage } from '../lib/mailer';
 import { validationErrorResponse } from '../lib/validation';
+import { sha256Hex } from './hash';
 import type { CaptchaVerifier } from './captcha';
 import { FolioExhaustedError, type QuotesCreateRepository } from './repository';
 
@@ -28,9 +36,11 @@ import { FolioExhaustedError, type QuotesCreateRepository } from './repository';
  * `createRouter` (que exige claims de Cognito): el cuerpo se mide, se parsea y se valida aquí.
  *
  * Orden fijo, de lo más barato a lo más caro, y SIN efectos hasta el final:
- *   método, tipo de contenido, tamaño (bytes, ANTES de parsear), JSON, esquema, honeypot, captcha,
- *   tarifa activa, piedras, armado y validación del documento, folio, Put, correos (best-effort).
- * El folio se reserva solo cuando todo lo demás es válido, para no gastar números en peticiones malas.
+ *   método, tipo de contenido, tamaño (bytes, ANTES de parsear), JSON, esquema, captcha, honeypot,
+ *   tarifa activa, piedras, armado y validación del documento, límite por IP y por correo, folio,
+ *   Put, correos (best-effort).
+ * El captcha va ANTES del honeypot: así un token inválido da 403 esté o no lleno el honeypot y el
+ * honeypot no sirve de oráculo. El límite y el folio se gastan solo cuando todo lo demás es válido.
  */
 
 /** Tope del cuerpo: un formulario normal pesa menos de 4 KB. */
@@ -122,6 +132,24 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
     }
   }
 
+  /**
+   * Folio señuelo del honeypot: el contador actual más 1 a 5, igual que un folio real próximo, para
+   * que un bot no distinga el señuelo del éxito (un rango fijo lo delataría frente a un folio real
+   * bajo). Solo LEE el contador. Si la lectura falla, cae a un número al azar de 1 a 2000: el
+   * señuelo nunca debe volverse un error, que también delataría la detección.
+   */
+  async function decoyFolio(year: number, log: Logger): Promise<string> {
+    let current: number;
+    try {
+      current = await repo.peekFolioNumber(year);
+    } catch (err) {
+      log.warn('decoy_counter_unavailable', { errName: errorName(err) });
+      return formatFolio(year, 1 + Math.floor(random() * 2000));
+    }
+    const decoy = current + 1 + Math.floor(random() * 5);
+    return formatFolio(year, Math.min(Math.max(decoy, 1), MAX_FOLIO_NUMBER));
+  }
+
   async function handleRequest(
     event: APIGatewayProxyEventV2,
     log: Logger,
@@ -151,15 +179,9 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
     const startedAt = now();
     const year = folioYear(startedAt);
 
-    // Honeypot: se responde EXACTAMENTE como un éxito (201 con un folio de forma válida) para que el
-    // bot no sepa que fue detectado; no se guarda nada, no se manda correo y no se gasta un folio.
-    if (request.website !== undefined && request.website.trim() !== '') {
-      log.info('honeypot_triggered');
-      const decoy = 1 + Math.floor(random() * MAX_FOLIO_NUMBER);
-      return jsonResponse(201, { folio: formatFolio(year, Math.min(decoy, MAX_FOLIO_NUMBER)) });
-    }
-
-    // Captcha: falla cerrado. Sin verificador configurado nunca se acepta una solicitud.
+    // Captcha: falla cerrado. Sin verificador configurado nunca se acepta una solicitud. Va ANTES
+    // del honeypot: si no, un token inválido daría 403 con el honeypot vacío y 201 con él lleno, y
+    // un bot sabría que fue detectado.
     if (deps.captcha === null) {
       log.warn('captcha_not_configured');
       throw new HttpError(503, 'captcha_not_configured');
@@ -178,6 +200,14 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
     if (!verified) {
       log.warn('captcha_failed');
       throw new HttpError(403, 'captcha_failed');
+    }
+
+    // Honeypot: se responde EXACTAMENTE como un éxito (201 con un folio de forma válida) para que el
+    // bot no sepa que fue detectado; no se guarda nada, no se manda correo, no se gasta un folio y
+    // no consume cupo del límite.
+    if (request.website !== undefined && request.website.trim() !== '') {
+      log.info('honeypot_triggered');
+      return jsonResponse(201, { folio: await decoyFolio(year, log) });
     }
 
     // Tarifa activa (de ahí sale la merma del peso) y piedras pedidas.
@@ -229,6 +259,38 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
         });
       }
       throw err;
+    }
+
+    // Límite de envíos por IP y por correo (anti abuso y anti relevo de correo), ANTES de reservar
+    // folio. Claves con sha256: ni el correo ni la IP quedan en claro. Sin IP en el evento (API
+    // Gateway siempre la manda) solo cuenta el correo. Un fallo del contador sube como 500.
+    const expiresAt = rateLimitExpiresAt(startedAt);
+    const limits: { kind: 'ip' | 'email'; key: string; max: number }[] = [];
+    if (typeof remoteIp === 'string' && remoteIp !== '') {
+      limits.push({
+        kind: 'ip',
+        key: ipRateKey(sha256Hex(remoteIp), startedAt),
+        max: MAX_QUOTES_PER_IP_PER_DAY,
+      });
+    }
+    limits.push({
+      kind: 'email',
+      key: emailRateKey(sha256Hex(normalizeEmailForRate(request.customer.correo)), startedAt),
+      max: MAX_QUOTES_PER_EMAIL_PER_DAY,
+    });
+    for (const limit of limits) {
+      if (!(await repo.consumeRateLimit(limit.key, limit.max, expiresAt))) {
+        log.warn('rate_limited', { kind: limit.kind });
+        return jsonResponse(
+          429,
+          {
+            error: 'rate_limited',
+            message:
+              'Recibimos demasiadas solicitudes desde este correo o esta conexión. Intenta de nuevo mañana o escríbenos por WhatsApp.',
+          },
+          { 'retry-after': String(secondsUntilNextRateLimitDay(startedAt)) },
+        );
+      }
     }
 
     let number: number;

@@ -159,7 +159,7 @@ describe('reserveFolioNumber', () => {
           UpdateExpression: 'ADD #v :n',
           ConditionExpression: 'attribute_not_exists(#v) OR #v < :max',
           ExpressionAttributeNames: { '#v': 'value' },
-          ExpressionAttributeValues: { ':n': 1, ':max': 99999 },
+          ExpressionAttributeValues: { ':n': 1, ':max': 999999 },
           ReturnValues: 'UPDATED_NEW',
         },
       },
@@ -190,6 +190,85 @@ describe('reserveFolioNumber', () => {
   it('año inválido: lanza sin llamar a DynamoDB', async () => {
     const { repo, commands } = setup();
     await expect(repo.reserveFolioNumber(99)).rejects.toThrow(RangeError);
+    expect(commands).toHaveLength(0);
+  });
+});
+
+describe('consumeRateLimit', () => {
+  const KEY = `rate#email#${'a'.repeat(64)}#2026-11-20`;
+
+  it('ADD atómico con tope y atributo ttl, en la tabla Counters', async () => {
+    const { repo, commands } = setup();
+    expect(await repo.consumeRateLimit(KEY, 5, 1_800_000_000)).toBe(true);
+    expect(commands).toEqual([
+      {
+        name: 'UpdateCommand',
+        input: {
+          TableName: 'Counters',
+          Key: { name: KEY },
+          UpdateExpression: 'ADD #v :n SET #ttl = :ttl',
+          ConditionExpression: 'attribute_not_exists(#v) OR #v < :max',
+          ExpressionAttributeNames: { '#v': 'value', '#ttl': 'ttl' },
+          ExpressionAttributeValues: { ':n': 1, ':max': 5, ':ttl': 1_800_000_000 },
+        },
+      },
+    ]);
+    expect(new UpdateCommand(commands[0]!.input as never)).toBeInstanceOf(UpdateCommand);
+  });
+
+  it('tope alcanzado (condición fallida): false, sin lanzar', async () => {
+    const { repo } = setup(() => named('ConditionalCheckFailedException'));
+    expect(await repo.consumeRateLimit(KEY, 5, 1)).toBe(false);
+  });
+
+  it('otros errores se propagan (la ruta falla cerrado)', async () => {
+    const { repo } = setup(() => named('ProvisionedThroughputExceededException'));
+    await expect(repo.consumeRateLimit(KEY, 5, 1)).rejects.toMatchObject({
+      name: 'ProvisionedThroughputExceededException',
+    });
+  });
+
+  it.each(['folio#2026', 'rate', 'rate#', '', 'x#rate#a', 'RATE#a'])(
+    'una clave que no es `rate#...` (%j) lanza sin llamar a DynamoDB: no toca los folios',
+    async (key) => {
+      const { repo, commands } = setup();
+      await expect(repo.consumeRateLimit(key, 5, 1)).rejects.toThrow(RangeError);
+      expect(commands).toHaveLength(0);
+    },
+  );
+
+  it.each([0, -1, 1.5, Number.NaN])('un tope inválido (%s) lanza', async (max) => {
+    const { repo, commands } = setup();
+    await expect(repo.consumeRateLimit(KEY, max, 1)).rejects.toThrow(RangeError);
+    expect(commands).toHaveLength(0);
+  });
+});
+
+describe('peekFolioNumber', () => {
+  it('GetItem consistente de `folio#<año>` y devuelve el valor actual', async () => {
+    const { repo, commands } = setup(() => ({ Item: { name: 'folio#2026', value: 42 } }));
+    expect(await repo.peekFolioNumber(2026)).toBe(42);
+    expect(commands).toEqual([
+      {
+        name: 'GetCommand',
+        input: { TableName: 'Counters', Key: { name: 'folio#2026' }, ConsistentRead: true },
+      },
+    ]);
+  });
+
+  it.each([
+    {},
+    { Item: { name: 'folio#2026' } },
+    { Item: { value: '5' } },
+    { Item: { value: -3 } },
+  ])('sin contador o con un valor raro (%j): 0', async (out) => {
+    const { repo } = setup(() => out);
+    expect(await repo.peekFolioNumber(2026)).toBe(0);
+  });
+
+  it('año inválido: lanza sin llamar a DynamoDB', async () => {
+    const { repo, commands } = setup();
+    await expect(repo.peekFolioNumber(99)).rejects.toThrow(RangeError);
     expect(commands).toHaveLength(0);
   });
 });

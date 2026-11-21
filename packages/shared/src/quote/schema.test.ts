@@ -88,11 +88,12 @@ describe('quoteSchema', () => {
 });
 
 describe('folio', () => {
-  it('formatea CN-AAAA-NNNNN', () => {
+  it('formatea CN-AAAA-NNNNN (y 6 dígitos desde 100 000)', () => {
     expect(formatFolio(2026, 42)).toBe('CN-2026-00042');
     expect(FOLIO_PATTERN.test('CN-2026-00042')).toBe(true);
     expect(() => formatFolio(2026, 0)).toThrow();
-    expect(() => formatFolio(2026, 100000)).toThrow();
+    expect(formatFolio(2026, 100000)).toBe('CN-2026-100000');
+    expect(() => formatFolio(2026, 1_000_000)).toThrow();
   });
 });
 

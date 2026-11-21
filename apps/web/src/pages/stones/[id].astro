@@ -78,23 +78,43 @@ const specs: [string, string][] = [
           </tbody>
         </table>
 
-        <div class="btn-row">
-          <button
-            type="button"
-            class="btn btn-primary"
-            disabled
-            aria-describedby="quote-hint"
-            data-stone-id={stone.id}
-          >
-            Agregar a cotización
-          </button>
-          <a class="btn btn-ghost" href="/contact/">
-            Preguntar por esta piedra
-          </a>
+        <div
+          class="add-quote"
+          data-add-to-quote
+          data-stone-id={stone.id}
+          data-stone-name={stone.nombre}
+          data-units={stone.vendidaPor.join(',')}
+        >
+          {stone.acabados.length > 0 && (
+            <div class="field">
+              <label for="finish-select">Acabado</label>
+              <select class="input" id="finish-select" data-finish>
+                <option value="">Sin preferencia</option>
+                {stone.acabados.map((a) => (
+                  <option value={a}>{a}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div class="btn-row">
+            <button
+              type="button"
+              class="btn btn-primary"
+              disabled
+              aria-describedby="quote-hint"
+              data-add-button
+            >
+              Agregar a cotización
+            </button>
+            <a class="btn btn-ghost" href="/quote/">
+              Ver mi cotización
+            </a>
+          </div>
+          <p class="note" role="status" data-add-status></p>
         </div>
         <p class="note" id="quote-hint">
-          La lista de cotización estará disponible pronto. Los precios se cotizan por proyecto:
-          dependen del volumen, el corte y el flete.
+          Los precios se cotizan por proyecto: dependen del volumen, el corte y el flete.
+          <noscript> Para armar tu lista de cotización necesitas activar JavaScript.</noscript>
         </p>
 
         {related.length > 0 && (
@@ -111,3 +131,7 @@ const specs: [string, string][] = [
     </div>
   </main>
 </BaseLayout>
+
+<script>
+  import '../../scripts/add-to-quote';
+</script>

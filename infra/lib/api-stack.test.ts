@@ -1928,7 +1928,7 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
     }
   });
 
-  it('IAM EXACTA de DynamoDB: 5 sentencias, ninguna de más', () => {
+  it('IAM EXACTA de DynamoDB: 6 sentencias, ninguna de más', () => {
     const { dt, data, ss } = conEntorno();
     const dyn = ss.filter(esDynamo);
     const resumen = dyn
@@ -1949,6 +1949,14 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
       {
         tabla: [idDe(data, data.counters)],
         acciones: ['dynamodb:UpdateItem'],
+        efecto: 'Allow',
+        condicion: {
+          'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['folio#*', 'rate#*'] },
+        },
+      },
+      {
+        tabla: [idDe(data, data.counters)],
+        acciones: ['dynamodb:GetItem'],
         efecto: 'Allow',
         condicion: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['folio#*'] } },
       },
@@ -1985,18 +1993,28 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
     expect(JSON.stringify(q[0]!['Resource'])).not.toContain('/index/');
   });
 
-  it('Counters: UpdateItem limitado por LeadingKeys StringLike a `folio#*` (nunca sin condición ni con `*` solo)', () => {
+  it('Counters: UpdateItem solo en `folio#*` y `rate#*`, y GetItem solo en `folio#*` (nunca sin condición ni con `*` solo)', () => {
     const { dt, data, ss } = conEntorno();
     const c = ss.filter(
       (s) => esDynamo(s) && tablasDeSentencia(dt, s).includes(idDe(data, data.counters)),
     );
-    expect(c).toHaveLength(1);
-    const cond = c[0]!['Condition'] as Json;
-    expect(cond).toBeDefined();
-    expect(Object.keys(cond)).toEqual(['ForAllValues:StringLike']);
-    const claves = cond['ForAllValues:StringLike']['dynamodb:LeadingKeys'] as string[];
-    expect(claves).toEqual(['folio#*']);
-    expect(claves.every((k) => k.startsWith('folio#') && k !== '*')).toBe(true);
+    expect(c).toHaveLength(2);
+    const porAccion = new Map(c.map((s) => [lista(s['Action']).join(','), s]));
+    expect([...porAccion.keys()].sort()).toEqual(['dynamodb:GetItem', 'dynamodb:UpdateItem']);
+    for (const [accion, esperadas] of [
+      ['dynamodb:UpdateItem', ['folio#*', 'rate#*']],
+      ['dynamodb:GetItem', ['folio#*']],
+    ] as const) {
+      const cond = porAccion.get(accion)!['Condition'] as Json;
+      expect(cond, accion).toBeDefined();
+      expect(Object.keys(cond)).toEqual(['ForAllValues:StringLike']);
+      const claves = cond['ForAllValues:StringLike']['dynamodb:LeadingKeys'] as string[];
+      expect(claves, accion).toEqual(esperadas);
+      expect(claves.every((k) => /^(folio|rate)#/.test(k) && k !== '*')).toBe(true);
+    }
+    // Ninguna otra acción (Put, Delete, Query, Scan, BatchWrite...) sobre Counters.
+    const acciones = c.flatMap((s) => lista(s['Action']));
+    expect(acciones.sort()).toEqual(['dynamodb:GetItem', 'dynamodb:UpdateItem']);
   });
 
   it('Settings: solo la fila PUBLIC (nunca MAIL)', () => {
@@ -2027,6 +2045,40 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
   });
 
   describe('captcha (Turnstile)', () => {
+    describe('TURNSTILE_ALLOWED_HOSTNAMES (hostname de siteverify)', () => {
+      it('con Turnstile real: SOLO los hostnames de SITE_ORIGINS (sin esquema ni puerto y sin el dashboard)', () => {
+        const { vars } = conEntorno({
+          turnstileSecretParam: PARAM,
+          siteOrigins: ['https://www.ejemplo.mx', 'https://sitio.ejemplo.mx:8443'],
+          allowedOrigins: ['https://admin.ejemplo.mx'],
+        });
+        expect(vars['TURNSTILE_ALLOWED_HOSTNAMES']).toBe('www.ejemplo.mx,sitio.ejemplo.mx');
+      });
+
+      it('en dev sin SITE_ORIGINS usa el origen local del sitio (localhost)', () => {
+        const { vars } = conEntorno({ turnstileSecretParam: PARAM });
+        expect(vars['TURNSTILE_ALLOWED_HOSTNAMES']).toBe('localhost');
+      });
+
+      it('sin verificador real (sin parámetro o con emulador) no existe', () => {
+        expect(conEntorno().vars['TURNSTILE_ALLOWED_HOSTNAMES']).toBeUndefined();
+        expect(
+          conEntorno({ emulated: true, turnstileSecretParam: PARAM }).vars[
+            'TURNSTILE_ALLOWED_HOSTNAMES'
+          ],
+        ).toBeUndefined();
+      });
+
+      it('en prod sin SITE_ORIGINS no hay lista (el sitio aún no existe) y no se inventa una', () => {
+        const { vars } = conEntorno({
+          name: 'prod',
+          allowedOrigins: ['https://admin.ejemplo.mx'],
+          turnstileSecretParam: '/canteras/prod/turnstile',
+        });
+        expect(vars['TURNSTILE_ALLOWED_HOSTNAMES']).toBeUndefined();
+      });
+    });
+
     it('con emulador: TURNSTILE_MODE=fake y NINGÚN permiso de SSM (aunque se pida un parámetro)', () => {
       for (const turnstileSecretParam of [undefined, PARAM]) {
         const { vars, ss } = conEntorno({
@@ -2215,6 +2267,7 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
             'COUNTERS_TABLE',
             'TURNSTILE_MODE',
             'TURNSTILE_SECRET_PARAM',
+            'TURNSTILE_ALLOWED_HOSTNAMES',
             'ADMIN_BASE_URL',
           ]) {
             expect(vars, `${f} ${v}`).not.toContain(v);

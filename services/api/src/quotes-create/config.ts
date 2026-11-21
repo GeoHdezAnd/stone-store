@@ -10,6 +10,8 @@ export interface QuotesCreateConfig {
   turnstileMode?: 'fake';
   /** Nombre del parámetro SSM (SecureString) con el secreto de Turnstile. */
   turnstileSecretParam?: string;
+  /** Hostnames de nuestro sitio (de SITE_ORIGINS) que se exigen en la respuesta de Turnstile. */
+  turnstileAllowedHostnames?: string[];
 }
 
 function required(env: Record<string, string | undefined>, name: string): string {
@@ -80,6 +82,21 @@ export function loadConfig(env: Record<string, string | undefined>): QuotesCreat
       );
     }
     config.turnstileSecretParam = param;
+  }
+
+  const hostnames = optional(env, 'TURNSTILE_ALLOWED_HOSTNAMES')
+    ?.trim()
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h !== '');
+  if (hostnames !== undefined && hostnames.length > 0) {
+    // Solo el hostname: sin esquema, ruta, comodines, espacios, puntos dobles ni punto final.
+    if (!hostnames.every((h) => /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/.test(h))) {
+      throw new Error(
+        'TURNSTILE_ALLOWED_HOSTNAMES no es válida: lista de hostnames separados por comas (sin esquema ni ruta).',
+      );
+    }
+    config.turnstileAllowedHostnames = hostnames;
   }
 
   if (config.turnstileMode !== undefined && config.turnstileSecretParam !== undefined) {

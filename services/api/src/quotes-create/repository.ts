@@ -2,7 +2,7 @@ import { FREIGHT_VERSION_PATTERN, MAX_FOLIO_NUMBER, folioCounterName } from '@ca
 import { BatchGetCommand, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ACTIVE_KEY } from '../admin-freight/repository';
 
-/** El contador del año llegó a 99 999: no caben más folios. */
+/** El contador del año llegó a 999 999: no caben más folios. */
 export class FolioExhaustedError extends Error {
   constructor() {
     super('El contador de folios del año está agotado.');
@@ -32,6 +32,13 @@ export interface QuotesCreateRepository {
   getPublicSettings(): Promise<Record<string, unknown> | null>;
   /** Reserva el siguiente número de folio del año (ADD atómico). Lanza `FolioExhaustedError` al agotarse. */
   reserveFolioNumber(year: number): Promise<number>;
+  /**
+   * Cuenta una solicitud en el contador de límite `key` (`rate#...`): ADD atómico con tope `max` y
+   * atributo `ttl` (segundos epoch) para que DynamoDB lo borre solo. `false` = tope alcanzado.
+   */
+  consumeRateLimit(key: string, max: number, expiresAtSeconds: number): Promise<boolean>;
+  /** Número de folio ya concedido en el año (0 si no hay contador). Solo lectura: no reserva nada. */
+  peekFolioNumber(year: number): Promise<number>;
   /** Crea la solicitud solo si el `quoteId` no existe. Lanza `DuplicateQuoteError` si ya existe. */
   putQuote(item: Record<string, unknown>): Promise<void>;
 }
@@ -143,6 +150,36 @@ export class DynamoQuotesCreateRepository implements QuotesCreateRepository {
       if (isConditionFailed(err)) throw new FolioExhaustedError();
       throw err;
     }
+  }
+
+  async consumeRateLimit(key: string, max: number, expiresAtSeconds: number): Promise<boolean> {
+    // Defensa en profundidad: este método nunca debe tocar los contadores de folio.
+    if (!key.startsWith('rate#') || key.length <= 'rate#'.length) {
+      throw new RangeError('La clave del límite debe empezar con `rate#`.');
+    }
+    if (!Number.isInteger(max) || max < 1) throw new RangeError('El tope del límite es inválido.');
+    try {
+      await this.client.send(
+        new UpdateCommand({
+          TableName: this.tables.counters,
+          Key: { name: key },
+          UpdateExpression: 'ADD #v :n SET #ttl = :ttl',
+          ConditionExpression: 'attribute_not_exists(#v) OR #v < :max',
+          ExpressionAttributeNames: { '#v': 'value', '#ttl': 'ttl' },
+          ExpressionAttributeValues: { ':n': 1, ':max': max, ':ttl': expiresAtSeconds },
+        }),
+      );
+      return true;
+    } catch (err) {
+      if (isConditionFailed(err)) return false;
+      throw err;
+    }
+  }
+
+  async peekFolioNumber(year: number): Promise<number> {
+    const item = await this.getItem(this.tables.counters, { name: folioCounterName(year) });
+    const value = item?.['value'];
+    return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0;
   }
 
   async putQuote(item: Record<string, unknown>): Promise<void> {

@@ -101,4 +101,36 @@ describe('loadConfig de quotes-create', () => {
       ).toThrow(/TURNSTILE/);
     });
   });
+
+  describe('TURNSTILE_ALLOWED_HOSTNAMES', () => {
+    it('lista separada por comas, en minúsculas y sin espacios', () => {
+      expect(
+        loadConfig({
+          ...BASE,
+          TURNSTILE_ALLOWED_HOSTNAMES: ' Sitio.Ejemplo.mx , www.ejemplo.mx,localhost ',
+        }).turnstileAllowedHostnames,
+      ).toEqual(['sitio.ejemplo.mx', 'www.ejemplo.mx', 'localhost']);
+    });
+
+    it('vacía o ausente = sin validación de hostname', () => {
+      expect(loadConfig(BASE).turnstileAllowedHostnames).toBeUndefined();
+      expect(
+        loadConfig({ ...BASE, TURNSTILE_ALLOWED_HOSTNAMES: ' ' }).turnstileAllowedHostnames,
+      ).toBeUndefined();
+    });
+
+    it.each([
+      'https://sitio.ejemplo.mx',
+      'sitio.ejemplo.mx/ruta',
+      'a b.mx',
+      '*.ejemplo.mx',
+      'a..b',
+      '.a.mx',
+      'a.mx.',
+    ])('rechaza %s (debe ser solo el hostname)', (bad) => {
+      expect(() => loadConfig({ ...BASE, TURNSTILE_ALLOWED_HOSTNAMES: bad })).toThrow(
+        /TURNSTILE_ALLOWED_HOSTNAMES/,
+      );
+    });
+  });
 });

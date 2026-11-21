@@ -7,9 +7,13 @@ import { isValidRecipient } from './email';
 // Estricto: no existe ningún campo de peso, precio, nombre de piedra, folio, estado ni fecha; todo
 // eso lo pone el servidor. Los mensajes van en español y NO reproducen lo enviado.
 
-// Caracteres de control y de dirección (U+202E invierte el texto): nunca van en un dato de una línea.
-const CONTROL_RE = /[\p{Cc}‎‏‪-‮⁦-⁩]/u;
-const PEOPLE_NOTES_ALLOWED = /[\t\n\r]/g;
+// Caracteres de control (Cc), de formato e invisibles (Cf: U+200B, U+FEFF, U+061C, U+00AD, U+180E,
+// U+202E que invierte el texto...) y separadores de línea y párrafo (Zl/Zp: U+2028, U+2029). Se
+// RECHAZAN (422) en lugar de limpiarse: no alteran el dato en silencio y nadie los usa para ocultar
+// texto ni para imitar un renglón en el aviso al dueño. Costo asumido: tampoco se admiten U+200C y
+// U+200D (necesarios en algunas escrituras y en emoji compuestos); el sitio es en español.
+const CONTROL_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const NOTES_ALLOWED_CONTROL = /[\t\n\r]/g;
 
 /** Texto de una sola línea: se recortan espacios y no admite saltos ni caracteres de control. */
 function line(max: number, label: string, { required = true }: { required?: boolean } = {}) {
@@ -28,9 +32,10 @@ const notes = z
   .string({ error: 'Las notas deben ser texto' })
   .trim()
   .max(2000, 'Las notas admiten máximo 2000 caracteres')
-  // Las notas sí pueden llevar saltos de línea y tabulaciones, pero no otros caracteres de control.
+  // Las notas sí pueden llevar saltos de línea y tabulaciones (\t \n \r), pero ningún otro carácter
+  // de control, de formato ni separador (U+2028, U+2029, U+0085...).
   .refine(
-    (s) => !CONTROL_RE.test(s.replace(PEOPLE_NOTES_ALLOWED, '')),
+    (s) => !CONTROL_RE.test(s.replace(NOTES_ALLOWED_CONTROL, '')),
     'Las notas contienen caracteres no permitidos',
   );
 

@@ -299,3 +299,60 @@ describe('createQuoteRequestSchema: mensajes', () => {
     }
   });
 });
+
+// Caracteres invisibles o separadores que no se ven pero cambian el texto: se RECHAZAN (422) en vez
+// de limpiarse en silencio, para no alterar el dato ni dejar que el cliente los use para ocultar
+// texto o imitar un renglón en el aviso al dueño.
+const INVISIBLES: [string, string][] = [
+  ['U+2028 separador de línea', ' '],
+  ['U+2029 separador de párrafo', ' '],
+  ['U+200B espacio de ancho cero', '​'],
+  ['U+FEFF marca de orden de bytes', '﻿'],
+  ['U+061C marca de letra árabe', '؜'],
+  ['U+00AD guion suave', '­'],
+  ['U+180E separador mongol', '᠎'],
+  ['U+200D unión de ancho cero', '‍'],
+  ['U+2060 unidor de palabras', '⁠'],
+];
+
+describe('createQuoteRequestSchema: caracteres invisibles', () => {
+  describe.each(INVISIBLES)('%s', (_n, ch) => {
+    it.each([
+      [
+        'customer.nombre',
+        { customer: { nombre: `Ana${ch}Pérez`, telefono: '555-0101', correo: 'a@example.com' } },
+      ],
+      [
+        'customer.telefono',
+        { customer: { nombre: 'Ana', telefono: `555${ch}0101`, correo: 'a@example.com' } },
+      ],
+      ['works.lugar', { works: { lugar: `x${ch}y`, codigoPostal: '72810', uso: '', notas: '' } }],
+      ['works.uso', { works: { lugar: 'x', codigoPostal: '72810', uso: `a${ch}b`, notas: '' } }],
+      ['works.notas', { works: { lugar: 'x', codigoPostal: '72810', uso: '', notas: `a${ch}b` } }],
+    ])('se rechaza en %s', (campo, over) => {
+      expect(paths(valid(over))).toContain(campo);
+    });
+
+    it('se rechaza en el acabado de una piedra', () => {
+      const items = [{ stoneId: 'caliza', acabado: `a${ch}b`, cantidad: 1, unidad: 'pieza' }];
+      expect(paths(valid({ items }))).toContain('items.0.acabado');
+    });
+  });
+
+  it('las notas siguen admitiendo \\t \\n \\r', () => {
+    const works = { lugar: 'x', codigoPostal: '72810', uso: '', notas: 'a\tb\nc\r\nd' };
+    expect(createQuoteRequestSchema.safeParse(valid({ works })).success).toBe(true);
+  });
+
+  it('las notas rechazan el resto de caracteres de control (U+0085, U+000B)', () => {
+    for (const ch of ['\u0085', '\u000B', '\u0000']) {
+      const works = { lugar: 'x', codigoPostal: '72810', uso: '', notas: `a${ch}b` };
+      expect(paths(valid({ works }))).toContain('works.notas');
+    }
+  });
+
+  it('un nombre con acentos y eñes sigue siendo válido', () => {
+    const customer = { nombre: 'José Ángel Muñoz', telefono: '555-0101', correo: 'a@example.com' };
+    expect(createQuoteRequestSchema.safeParse(valid({ customer })).success).toBe(true);
+  });
+});

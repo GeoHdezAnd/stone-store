@@ -9,12 +9,20 @@ import {
 } from './repository';
 
 export type MemoryMethod =
-  'getActiveFreightRow' | 'getStones' | 'getPublicSettings' | 'reserveFolioNumber' | 'putQuote';
+  | 'getActiveFreightRow'
+  | 'getStones'
+  | 'getPublicSettings'
+  | 'reserveFolioNumber'
+  | 'consumeRateLimit'
+  | 'peekFolioNumber'
+  | 'putQuote';
 
 export class MemoryQuotesCreateRepository implements QuotesCreateRepository {
   readonly calls: string[] = [];
   readonly quotes = new Map<string, Record<string, unknown>>();
   readonly counters = new Map<number, number>();
+  /** Contadores de límite: clave -> `{ value, ttl }` (como la fila de DynamoDB). */
+  readonly rateLimits = new Map<string, { value: number; ttl: number }>();
   readonly stones = new Map<string, Record<string, unknown>>();
   activeFreight: Record<string, unknown> | null = null;
   publicSettings: Record<string, unknown> | null = null;
@@ -50,6 +58,21 @@ export class MemoryQuotesCreateRepository implements QuotesCreateRepository {
     if (current >= MAX_FOLIO_NUMBER) throw new FolioExhaustedError();
     this.counters.set(year, current + 1);
     return current + 1;
+  }
+
+  async consumeRateLimit(key: string, max: number, expiresAtSeconds: number): Promise<boolean> {
+    this.enter('consumeRateLimit');
+    if (!key.startsWith('rate#'))
+      throw new RangeError('La clave del límite debe empezar con `rate#`.');
+    const current = this.rateLimits.get(key)?.value ?? 0;
+    if (current >= max) return false;
+    this.rateLimits.set(key, { value: current + 1, ttl: expiresAtSeconds });
+    return true;
+  }
+
+  async peekFolioNumber(year: number): Promise<number> {
+    this.enter('peekFolioNumber');
+    return this.counters.get(year) ?? 0;
   }
 
   async putQuote(item: Record<string, unknown>): Promise<void> {

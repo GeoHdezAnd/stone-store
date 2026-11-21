@@ -1,0 +1,286 @@
+---
+import { USE_CATEGORY_LABELS } from '@canteras/shared';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { loadCatalog } from '../lib/catalog-loader';
+
+const { catalog } = await loadCatalog();
+
+// Número de WhatsApp de la configuración pública; el de respaldo es DE EJEMPLO (no es de nadie).
+const EXAMPLE_WHATSAPP = '525500000000';
+const whatsapp = catalog.settings.whatsapp || EXAMPLE_WHATSAPP;
+
+// Datos mínimos de cada piedra para armar la lista en el navegador (unidades y espesores válidos).
+const stones = catalog.stones.map((s) => ({
+  id: s.id,
+  nombre: s.nombre,
+  vendidaPor: s.vendidaPor,
+  espesoresCm: s.espesoresCm,
+}));
+
+// «Para qué es»: las categorías de uso del catálogo y el motivo «visita» (`?motivo=visita`).
+const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
+---
+
+<BaseLayout
+  title="Cotización"
+  description="Pide tu cotización de piedra natural: arma tu lista y cuéntanos la obra."
+>
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">Cotización</span>
+      <h1 class="page-title">Cuéntanos la obra</h1>
+      <p class="lead">
+        Con medidas aproximadas y el uso que le vas a dar, te respondemos en menos de 48 horas. Esta
+        tienda no cobra en línea: recibirás una cotización por correo.
+      </p>
+    </section>
+    <hr class="rule" />
+
+    <div
+      class="quote-app"
+      data-quote-app
+      data-stones={JSON.stringify(stones)}
+      data-whatsapp={whatsapp}
+    >
+      <div data-view="form">
+        <noscript>
+          <p class="notice notice--error">
+            Para enviar la solicitud necesitas activar JavaScript. Mientras tanto puedes escribirnos
+            por{' '}
+            <a href={`https://wa.me/${whatsapp}`} rel="noopener">
+              WhatsApp
+            </a>
+            .
+          </p>
+        </noscript>
+        <p class="notice notice--error" role="alert" data-config-warning hidden>
+          El envío de solicitudes no está configurado en este sitio. Escríbenos por
+          <a href={`https://wa.me/${whatsapp}`} rel="noopener">
+            WhatsApp
+          </a>
+          .
+        </p>
+
+        <form class="quote-form" data-quote-form novalidate>
+          <div
+            class="notice notice--error"
+            role="alert"
+            tabindex="-1"
+            data-form-status
+            hidden
+          ></div>
+
+          <section class="quote-form__section" aria-labelledby="list-title">
+            <h2 id="list-title" class="label">
+              Tu lista · <span data-list-count>0</span> piedras
+            </h2>
+            <ol class="quote-items" data-items></ol>
+            <p class="empty-list" data-empty hidden>
+              Tu lista está vacía. <a href="/catalog/">Elige piedras en el catálogo</a> y vuelve
+              aquí.
+            </p>
+            <p
+              class="error"
+              id="items-error"
+              role="alert"
+              tabindex="-1"
+              data-error-for="items"
+              hidden
+            ></p>
+          </section>
+
+          <section class="quote-form__section" aria-labelledby="contact-title">
+            <h2 id="contact-title" class="label">
+              Tus datos
+            </h2>
+            <div class="quote-grid">
+              <div class="field">
+                <label for="f-nombre">Nombre</label>
+                <input
+                  class="input"
+                  id="f-nombre"
+                  name="nombre"
+                  autocomplete="name"
+                  maxlength="120"
+                  aria-describedby="f-nombre-error"
+                />
+                <span class="error" id="f-nombre-error" hidden></span>
+              </div>
+              <div class="field">
+                <label for="f-telefono">WhatsApp o teléfono</label>
+                <input
+                  class="input"
+                  id="f-telefono"
+                  name="telefono"
+                  type="tel"
+                  autocomplete="tel"
+                  inputmode="tel"
+                  maxlength="30"
+                  placeholder="222 000 0000"
+                  aria-describedby="f-telefono-error"
+                />
+                <span class="error" id="f-telefono-error" hidden></span>
+              </div>
+              <div class="field">
+                <label for="f-correo">Correo</label>
+                <input
+                  class="input"
+                  id="f-correo"
+                  name="correo"
+                  type="email"
+                  autocomplete="email"
+                  maxlength="254"
+                  aria-describedby="f-correo-error"
+                />
+                <span class="error" id="f-correo-error" hidden></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="quote-form__section" aria-labelledby="work-title">
+            <h2 id="work-title" class="label">
+              La obra
+            </h2>
+            <div class="quote-grid">
+              <div class="field">
+                <label for="f-lugar">Lugar de la obra</label>
+                <input
+                  class="input"
+                  id="f-lugar"
+                  name="lugar"
+                  maxlength="200"
+                  placeholder="Tepeyahualco, Puebla"
+                  aria-describedby="f-lugar-error"
+                />
+                <span class="error" id="f-lugar-error" hidden></span>
+              </div>
+              <div class="field">
+                <label for="f-cp">Código postal de la obra</label>
+                <input
+                  class="input"
+                  id="f-cp"
+                  name="cp"
+                  inputmode="numeric"
+                  autocomplete="postal-code"
+                  maxlength="5"
+                  placeholder="74000"
+                  aria-describedby="f-cp-error"
+                />
+                <span class="error" id="f-cp-error" hidden></span>
+              </div>
+              <div class="field">
+                <label for="f-uso">Para qué es</label>
+                <select class="input" id="f-uso" name="uso" aria-describedby="f-uso-error">
+                  <option value="">Prefiero explicarlo en las notas</option>
+                  {usos.map((u) => (
+                    <option value={u}>{u}</option>
+                  ))}
+                </select>
+                <span class="error" id="f-uso-error" hidden></span>
+              </div>
+              <div class="field quote-grid__wide">
+                <label for="f-notas">Medidas y detalles (opcional)</label>
+                <textarea
+                  class="input"
+                  id="f-notas"
+                  name="notas"
+                  maxlength="2000"
+                  aria-describedby="f-notas-error"
+                ></textarea>
+                <span class="error" id="f-notas-error" hidden></span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Honeypot: una persona nunca lo ve ni lo llena; un bot sí. -->
+          <div class="hp" aria-hidden="true">
+            <label for="f-website">No llenes este campo</label>
+            <input
+              id="f-website"
+              name="website"
+              type="text"
+              tabindex="-1"
+              autocomplete="off"
+              data-honeypot
+            />
+          </div>
+
+          <section class="quote-form__section">
+            <div class="field consent">
+              <label class="consent__label" for="f-consent">
+                <input
+                  type="checkbox"
+                  id="f-consent"
+                  name="consent"
+                  aria-describedby="f-consent-error"
+                />
+                <span>
+                  Acepto el <a href="/aviso-de-privacidad/">aviso de privacidad</a>
+                </span>
+              </label>
+              <span class="error" id="f-consent-error" hidden></span>
+            </div>
+
+            <div class="field">
+              <div id="turnstile-widget" data-turnstile></div>
+              <p class="note" data-turnstile-note hidden></p>
+              <span class="error" id="f-turnstile-error" role="alert" hidden></span>
+            </div>
+
+            <p class="note">
+              El estimado de flete se calcula al cotizar y está sujeto a confirmación. No recabamos
+              precios ni datos de pago en este sitio.
+            </p>
+
+            <div class="btn-row">
+              <button type="submit" class="btn btn-primary" data-submit>
+                Enviar solicitud
+              </button>
+              <a
+                class="btn btn-ghost"
+                href={`https://wa.me/${whatsapp}`}
+                target="_blank"
+                rel="noopener"
+                data-whatsapp-link
+              >
+                Escribir por WhatsApp
+              </a>
+            </div>
+          </section>
+        </form>
+      </div>
+
+      <div class="quote-done" data-view="done" hidden>
+        <h2 class="quote-done__title" tabindex="-1" data-done-title>
+          ¡Recibimos tu solicitud!
+        </h2>
+        <p data-done-folio-wrap hidden>
+          Tu folio es <strong class="quote-done__folio" data-folio></strong>. Guárdalo por si
+          necesitas dar seguimiento.
+        </p>
+        <p>
+          Te enviamos un correo de confirmación. Revisaremos tu lista y te responderemos en menos de
+          48 horas con la cotización.
+        </p>
+        <div class="btn-row">
+          <a class="btn btn-primary" href="/catalog/">
+            Seguir viendo piedras
+          </a>
+          <a
+            class="btn btn-ghost"
+            href={`https://wa.me/${whatsapp}`}
+            target="_blank"
+            rel="noopener"
+            data-done-whatsapp
+          >
+            Escribir por WhatsApp
+          </a>
+        </div>
+      </div>
+    </div>
+  </main>
+</BaseLayout>
+
+<script>
+  import '../scripts/quote-page';
+</script>

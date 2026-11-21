@@ -640,7 +640,8 @@ export class ApiStack extends Stack {
     // Formulario público de cotización (`POST /quotes`, CLAUDE.md 5.1 y 8): ruta SIN authorizer que
     // escribe en la base y manda correos. Mínimo privilegio con sentencias explícitas (sin `grant*`):
     // - Quotes: solo `PutItem` (crea la solicitud; no lee, consulta, actualiza ni borra).
-    // - Counters: solo `UpdateItem` y SOLO claves `folio#*` (el contador de folios).
+    // - Counters: `UpdateItem` solo en claves `folio#*` (folios) y `rate#*` (límite de solicitudes por
+    //   correo e IP, con `ttl`), y `GetItem` solo en `folio#*` (folio señuelo del honeypot).
     // - Stones: `BatchGetItem` (las piedras pedidas, para calcular el peso en el servidor).
     // - FreightConfig: `GetItem` (puntero ACTIVE y versión activa: de ahí sale la merma).
     // - Settings: `GetItem` de la fila PUBLIC (remitente y patio; nunca la MAIL).
@@ -670,7 +671,19 @@ export class ApiStack extends Stack {
         effect: Effect.ALLOW,
         actions: ['dynamodb:UpdateItem'],
         resources: [tables.counters.tableArn],
-        // Defensa en profundidad: solo los contadores de folio (`folio#<año>`).
+        // Defensa en profundidad: solo los contadores de folio (`folio#<año>`) y los del límite de
+        // solicitudes (`rate#email#...`, `rate#ip#...`, con atributo `ttl`).
+        conditions: {
+          'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['folio#*', 'rate#*'] },
+        },
+      }),
+    );
+    quotesCreate.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        // Solo LEE el contador del folio: el folio señuelo del honeypot se parece al real.
+        actions: ['dynamodb:GetItem'],
+        resources: [tables.counters.tableArn],
         conditions: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['folio#*'] } },
       }),
     );
@@ -728,6 +741,15 @@ export class ApiStack extends Stack {
       // Sin parámetro no hay verificador real: la ruta responde 503 `captcha_not_configured`.
       if (turnstileSecretParam !== undefined) {
         quotesCreate.addEnvironment('TURNSTILE_SECRET_PARAM', turnstileSecretParam);
+        // Hostnames de NUESTRO sitio (de SITE_ORIGINS, no del dashboard): la Lambda exige que el
+        // `hostname` de siteverify sea uno de ellos. Sin sitio configurado (prod sin SITE_ORIGINS)
+        // no hay lista y no se valida.
+        const siteHostnames = [
+          ...new Set(validateSiteOrigins(deploy, siteOrigins).map((o) => new URL(o).hostname)),
+        ];
+        if (siteHostnames.length > 0) {
+          quotesCreate.addEnvironment('TURNSTILE_ALLOWED_HOSTNAMES', siteHostnames.join(','));
+        }
         quotesCreate.addToRolePolicy(
           new PolicyStatement({
             effect: Effect.ALLOW,

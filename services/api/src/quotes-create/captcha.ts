@@ -46,6 +46,12 @@ export interface TurnstileDeps {
   secret: () => Promise<string>;
   fetch?: FetchLike;
   timeoutMs?: number;
+  /**
+   * Hostnames de NUESTRO sitio (derivados de SITE_ORIGINS). Si la respuesta de siteverify trae
+   * `hostname`, debe estar aquí: un token resuelto en la página de un atacante (otro hostname) falla
+   * cerrado. Sin lista (vacía o ausente) no se valida; si el campo no viene, tampoco se exige.
+   */
+  allowedHostnames?: readonly string[] | undefined;
 }
 
 export class TurnstileVerifier implements CaptchaVerifier {
@@ -55,6 +61,15 @@ export class TurnstileVerifier implements CaptchaVerifier {
   constructor(private readonly deps: TurnstileDeps) {
     this.fetchImpl = deps.fetch ?? ((url, init) => fetch(url, init));
     this.timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
+
+  /** `hostname` ausente: se acepta. Presente: debe ser texto y estar en la lista (si hay lista). */
+  private hostnameAllowed(hostname: unknown): boolean {
+    if (hostname === undefined) return true;
+    const allowed = this.deps.allowedHostnames;
+    if (allowed === undefined || allowed.length === 0) return true;
+    if (typeof hostname !== 'string' || hostname === '') return false;
+    return allowed.some((h) => h.toLowerCase() === hostname.toLowerCase());
   }
 
   async verify(input: { token: string; remoteIp?: string | undefined }): Promise<boolean> {
@@ -88,12 +103,15 @@ export class TurnstileVerifier implements CaptchaVerifier {
       });
       if (!res.ok) return false;
       const body = await res.json();
-      return (
-        typeof body === 'object' &&
-        body !== null &&
-        !Array.isArray(body) &&
-        (body as { success?: unknown }).success === true
-      );
+      if (
+        typeof body !== 'object' ||
+        body === null ||
+        Array.isArray(body) ||
+        (body as { success?: unknown }).success !== true
+      ) {
+        return false;
+      }
+      return this.hostnameAllowed((body as { hostname?: unknown }).hostname);
     })().catch(() => false);
 
     try {
@@ -139,6 +157,8 @@ export class SsmSecretProvider {
 export interface CaptchaEnv {
   turnstileMode?: 'fake' | undefined;
   turnstileSecretParam?: string | undefined;
+  /** Hostnames de nuestro sitio para validar `hostname` de siteverify (ver `TurnstileDeps`). */
+  turnstileAllowedHostnames?: readonly string[] | undefined;
 }
 
 /**
@@ -154,6 +174,7 @@ export function createCaptchaVerifier(
     const provider = new SsmSecretProvider(deps.ssm(), env.turnstileSecretParam);
     return new TurnstileVerifier({
       secret: () => provider.get(),
+      allowedHostnames: env.turnstileAllowedHostnames,
       ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
     });
   }

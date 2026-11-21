@@ -30,13 +30,59 @@ describe('buildCustomerConfirmationEmail', () => {
     expect(m.subject).toBe('Recibimos tu solicitud de cotización CN-2026-00042');
   });
 
-  it('el texto trae folio, saludo, piedras con cantidad y unidad, lugar y CP', () => {
-    expect(m.text).toContain('Hola Cliente Ejemplo,');
+  it('el texto trae folio, saludo genérico y piedras con nombre del catálogo, cantidad y unidad', () => {
+    expect(m.text.startsWith('Hola,\n')).toBe(true);
     expect(m.text).toContain('CN-2026-00042');
     expect(m.text).toContain('Arenisca (Labrado): 10.5 m²');
     expect(m.text).toContain('Caliza: 3 pieza(s)');
-    expect(m.text).toContain('San Andrés Cholula');
-    expect(m.text).toContain('72810');
+  });
+
+  it('NO repite NADA del texto libre del cliente: ni nombre, ni lugar, ni CP, ni uso, ni notas, ni teléfono', () => {
+    const q = nueva({
+      customer: {
+        nombre: 'NOMBRE-LIBRE Reactiva tu cuenta en https://evil.example/login',
+        telefono: '5551234567',
+        correo: 'cliente@example.com',
+      },
+      works: {
+        lugar: 'LUGAR-LIBRE https://evil.example/pago',
+        codigoPostal: '72810',
+        uso: 'USO-LIBRE',
+        notas: 'NOTAS-LIBRES paga el anticipo hoy',
+      },
+    });
+    const mm = buildCustomerConfirmationEmail({ quote: q, publicSettings });
+    for (const parte of [mm.text, mm.html, mm.subject, mm.from]) {
+      for (const libre of [
+        'NOMBRE-LIBRE',
+        'LUGAR-LIBRE',
+        'USO-LIBRE',
+        'NOTAS-LIBRES',
+        'evil.example',
+        '5551234567',
+        '72810',
+      ]) {
+        expect(parte, libre).not.toContain(libre);
+      }
+    }
+    // Lo único con forma de enlace es el WhatsApp del patio.
+    expect(mm.text.match(/https?:\/\/\S+/g)).toEqual(['https://wa.me/525500000000']);
+    expect(mm.html.match(/https?:\/\/[^\s<"]+/g)).toEqual(['https://wa.me/525500000000']);
+  });
+
+  it('el pie trae los datos del patio: nombre, dirección, horario y WhatsApp', () => {
+    expect(m.text).toContain('Canteras Naturales (ejemplo)');
+    expect(m.text).toContain('Dirección: Dirección de ejemplo');
+    expect(m.html).toContain('Dirección: Dirección de ejemplo');
+  });
+
+  it('con estimado de flete en la solicitud lo muestra como estimado sujeto a confirmación', () => {
+    const conEstimado = nueva({ freight: sampleQuote().freight });
+    const mm = buildCustomerConfirmationEmail({ quote: conEstimado, publicSettings });
+    expect(mm.text).toMatch(/Estimado de flete: \$1,400\.00 a \$1,700\.00 MXN/);
+    expect(mm.text).toMatch(/sujeto a confirmación/i);
+    expect(mm.html).toMatch(/Estimado de flete: \$1,400\.00 a \$1,700\.00 MXN/);
+    expect(mm.text).not.toMatch(/no incluye importes/);
   });
 
   it('promete respuesta en menos de 48 h y aclara que precios y flete se confirman en la cotización', () => {
@@ -71,14 +117,23 @@ describe('buildCustomerConfirmationEmail', () => {
     }
   });
 
-  it('el texto plano NO escapa (un & queda como &) y el HTML sí', () => {
+  it('el texto plano NO escapa (un & queda como &) y el HTML sí (nombre de piedra)', () => {
     const q = nueva({
-      works: { lugar: 'Tom & Jerry <obra>', codigoPostal: '72810', uso: '', notas: '' },
+      items: [
+        {
+          stoneId: 'a',
+          nombre: 'Tom & Jerry <piedra>',
+          acabado: '',
+          cantidad: 1,
+          unidad: 'm2',
+          pesoKg: 1,
+        },
+      ],
     });
     const mm = buildCustomerConfirmationEmail({ quote: q, publicSettings });
-    expect(mm.text).toContain('Tom & Jerry <obra>');
-    expect(mm.html).toContain('Tom &amp; Jerry &lt;obra&gt;');
-    expect(mm.html).not.toContain('<obra>');
+    expect(mm.text).toContain('Tom & Jerry <piedra>');
+    expect(mm.html).toContain('Tom &amp; Jerry &lt;piedra&gt;');
+    expect(mm.html).not.toContain('<piedra>');
   });
 });
 
@@ -111,7 +166,7 @@ describe('escape y cabeceras (cliente hostil)', () => {
   it('confirmación: el HTML escapa TODO valor del cliente', () => {
     const { html } = buildCustomerConfirmationEmail({ quote, publicSettings });
     expect(html).not.toMatch(/<script|<img|<svg|<i>|<b>/);
-    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;&quot;&#39;&amp;');
+    expect(html).not.toContain('alert(1)');
     expect(html).toContain('&lt;i&gt;Piedra&lt;/i&gt;');
     expect(html).toContain('&quot;Fino&quot;');
   });
@@ -120,6 +175,7 @@ describe('escape y cabeceras (cliente hostil)', () => {
     const { html } = buildOwnerNotificationEmail({ quote, publicSettings });
     expect(html).not.toMatch(/<script|<img|<svg|<i>|<b>/);
     expect(html).toContain('Hola<br>\n&lt;b&gt;negrita&lt;/b&gt;<br>\nTercera línea &amp; más');
+    expect(html).toMatch(/<blockquote[^>]*>Hola<br>/);
     expect(html).toContain('&quot;&gt;&lt;svg onload=x&gt;');
   });
 
@@ -253,5 +309,68 @@ describe('buildOwnerNotificationEmail', () => {
       publicSettings,
     });
     expect(m.text).toMatch(/Notas del cliente: \(sin notas\)/);
+  });
+});
+
+describe('buildOwnerNotificationEmail: enlace y notas no suplantables', () => {
+  const URL = 'https://admin.ejemplo.mx/quotes/01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const mk = (notas: string, adminBaseUrl: string | null = 'https://admin.ejemplo.mx') =>
+    buildOwnerNotificationEmail({
+      quote: nueva({ works: { lugar: 'x', codigoPostal: '72810', uso: '', notas } }),
+      publicSettings,
+      adminBaseUrl: adminBaseUrl ?? undefined,
+    });
+
+  it('el enlace real va AL PRINCIPIO del texto (primera línea)', () => {
+    const m = mk('ok');
+    expect(m.text.split('\n')[0]).toBe(`Ver y cotizar en el dashboard: ${URL}`);
+  });
+
+  it('el enlace real va AL PRINCIPIO del HTML (antes de cualquier dato)', () => {
+    const m = mk('ok');
+    expect(m.html.indexOf(`<a href="${URL}">`)).toBeGreaterThan(-1);
+    expect(m.html.indexOf(`<a href="${URL}">`)).toBeLessThan(m.html.indexOf('Nueva solicitud'));
+    expect(m.html.indexOf(`<a href="${URL}">`)).toBeLessThan(m.html.indexOf('ok'));
+  });
+
+  it('las notas van como bloque citado: cada línea empieza con `> `', () => {
+    const m = mk('línea 1\r\n\nlínea 3');
+    const i = m.text.indexOf('Notas del cliente:');
+    const bloque = m.text.slice(i).split('\n').slice(1);
+    expect(bloque.slice(0, 3)).toEqual(['> línea 1', '> ', '> línea 3']);
+  });
+
+  it('unas notas que imitan el enlace, con muchos saltos para empujarlo, quedan todas citadas', () => {
+    const falso = 'Ver y cotizar en el dashboard: https://admin.ejemplo.mx.evil.example/quotes/X';
+    const m = mk(`ok\n\n${falso}\n\n\n\n\n\n\n\n\n\n\n\n`);
+    const lineas = m.text.split('\n');
+    const idxFalso = lineas.findIndex((l) => l.includes('evil.example'));
+    expect(lineas[idxFalso]).toBe(`> ${falso}`);
+    // El único renglón SIN cita con forma de enlace al dashboard es el verdadero y es el primero.
+    const sinCita = lineas.filter((l) => !l.startsWith('> ') && /dashboard/.test(l));
+    expect(sinCita).toEqual([`Ver y cotizar en el dashboard: ${URL}`]);
+    // Y en HTML el texto falso queda escapado dentro del blockquote, sin ser un enlace.
+    expect(m.html).not.toMatch(/<a href="https:\/\/admin\.ejemplo\.mx\.evil/);
+    expect(m.html).toMatch(/<blockquote[^>]*>[\s\S]*evil\.example[\s\S]*<\/blockquote>/);
+  });
+
+  it('en HTML las notas van en <blockquote> y escapadas', () => {
+    const m = mk('<b>x</b> & "y"');
+    expect(m.html).toContain('<blockquote');
+    expect(m.html).toContain('&lt;b&gt;x&lt;/b&gt; &amp; &quot;y&quot;');
+    expect(m.html).not.toContain('<b>x</b>');
+  });
+
+  it('sin notas no hay bloque citado y se conserva el texto «(sin notas)»', () => {
+    const m = mk('');
+    expect(m.text).toMatch(/Notas del cliente: \(sin notas\)/);
+    expect(m.text).not.toMatch(/^> /m);
+    expect(m.html).not.toContain('<blockquote');
+  });
+
+  it('sin adminBaseUrl no hay enlace y el correo no empieza con uno', () => {
+    const m = mk('ok', null);
+    expect(m.text.startsWith('Nueva solicitud de cotización')).toBe(true);
+    expect(m.html).not.toContain('<a ');
   });
 });

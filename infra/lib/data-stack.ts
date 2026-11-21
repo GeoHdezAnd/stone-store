@@ -66,11 +66,13 @@ export class DataStack extends Stack {
       logicalId: string,
       partitionKey: ReturnType<typeof string>,
       sortKey?: ReturnType<typeof string>,
+      timeToLiveAttribute?: string,
     ) => {
       const table = new Table(this, logicalId, {
         ...common,
         partitionKey,
         ...(sortKey ? { sortKey } : {}),
+        ...(timeToLiveAttribute ? { timeToLiveAttribute } : {}),
       });
       // Salida con nombre lógico fijo: `scripts/seed.ts` las lee para saber en qué tabla
       // escribir. No cambiar estos ids sin ajustar el script.
@@ -97,7 +99,11 @@ export class DataStack extends Stack {
       nonKeyAttributes: ['userId', 'accion'],
     });
     this.publications = make('Publications', string('version'));
-    this.counters = make('Counters', string('name'));
+    // Contadores de folio (`folio#<año>`, sin `ttl`: no expiran) y del límite de solicitudes de
+    // `POST /quotes` (`rate#email#<sha256>#<día>`, `rate#ip#<sha256>#<día>`). Estos llevan el
+    // atributo `ttl` (segundos epoch, ~2 días) y DynamoDB los borra solo; TTL ignora las filas que
+    // no tienen el atributo, así que los folios no se ven afectados.
+    this.counters = make('Counters', string('name'), undefined, 'ttl');
     // Tarifas de flete: una fila por versión inmutable (`t0001`...) y una fila puntero `ACTIVE`
     // (versión activa + última creada). La «activa única» es atómica: ver services/api/src/admin-freight.
     this.freightConfig = make('FreightConfig', string('version'));

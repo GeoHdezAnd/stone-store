@@ -5,6 +5,7 @@ export * from './email';
 export * from './folio';
 export * from './mail-headers';
 export * from './new-quote-email';
+export * from './rate-limit';
 export * from './schema';
 export * from './search';
 export * from './totals';

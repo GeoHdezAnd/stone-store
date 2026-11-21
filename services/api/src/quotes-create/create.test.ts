@@ -1,4 +1,13 @@
-import { generateUlid, quoteSchema, stripStorageKeys } from '@canteras/shared';
+import {
+  FOLIO_PATTERN,
+  generateUlid,
+  MAX_FOLIO_NUMBER,
+  MAX_QUOTES_PER_EMAIL_PER_DAY,
+  MAX_QUOTES_PER_IP_PER_DAY,
+  quoteSchema,
+  stripStorageKeys,
+} from '@canteras/shared';
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mailer, MailMessage } from '../lib/mailer';
 import {
@@ -144,12 +153,14 @@ describe('éxito', () => {
     expect(repo.counters.has(2026)).toBe(false);
   });
 
-  it('orden fijo: tarifa, piedras, folio, guardar, y solo después Settings y correos', async () => {
+  it('orden fijo: tarifa, piedras, límites (IP y correo), folio, guardar, y solo después Settings y correos', async () => {
     const { call, repo } = setup();
     await call(validBody());
     expect(repo.calls).toEqual([
       'getActiveFreightRow',
       'getStones',
+      'consumeRateLimit',
+      'consumeRateLimit',
       'reserveFolioNumber',
       'putQuote',
       'getPublicSettings',
@@ -190,8 +201,15 @@ describe('correos', () => {
     expect(cliente.text).toContain('menos de 48 horas');
     expect(dueno.subject).toBe(`Nueva solicitud CN-2026-00001: ${SENTINEL.nombre}`);
     const id = storedQuote(repo)['quoteId'];
-    expect(dueno.text).toContain(`https://admin.ejemplo.mx/quotes/${id}`);
+    expect(dueno.text.split('\n')[0]).toBe(
+      `Ver y cotizar en el dashboard: https://admin.ejemplo.mx/quotes/${id}`,
+    );
     expect(dueno.text).toContain(SENTINEL.telefono);
+    // La confirmación al cliente no repite su texto libre (relevo de phishing).
+    for (const libre of [SENTINEL.nombre, SENTINEL.lugar, SENTINEL.notas, SENTINEL.telefono]) {
+      expect(cliente.text, libre).not.toContain(libre);
+      expect(cliente.html, libre).not.toContain(libre);
+    }
   });
 
   it('sin adminBaseUrl el aviso va sin enlace', async () => {
@@ -438,27 +456,93 @@ describe('validación', () => {
 });
 
 describe('honeypot', () => {
-  it('lleno: misma respuesta que un éxito (201 {folio}), sin guardar, sin correos, sin consumir folio', async () => {
+  it('lleno (con captcha válido): misma respuesta que un éxito (201 {folio}), sin guardar, sin correos, sin consumir folio ni cupo', async () => {
     const s = setup();
     const res = await s.call(validBody({ website: 'http://spam.example' }));
     const real = await setup().call(validBody());
     expect(res.statusCode).toBe(real.statusCode);
     expect(res.statusCode).toBe(201);
+    expect(res.headers).toEqual(real.headers);
     expect(Object.keys(json(res))).toEqual(Object.keys(json(real)));
-    expect(json(res).folio).toMatch(/^CN-2026-\d{5}$/);
+    expect(json(res).folio).toMatch(FOLIO_PATTERN);
     expect(s.repo.quotes.size).toBe(0);
     expect(s.repo.counters.size).toBe(0);
-    expect(s.repo.calls).toEqual([]);
+    expect(s.repo.rateLimits.size).toBe(0);
+    // Lo único que toca es LEER el contador, para que el señuelo se parezca al folio real.
+    expect(s.repo.calls).toEqual(['peekFolioNumber']);
     expect(s.sent).toEqual([]);
-    expect(s.verifyCalls).toEqual([]);
   });
 
-  it('el folio señuelo es verosímil y el log solo dice que se detectó (sin PII)', async () => {
+  it('el captcha se verifica ANTES: con token inválido da 403 esté o no lleno el honeypot (no es un oráculo)', async () => {
+    const lleno = await setup().call(validBody({ website: 'x', turnstileToken: 'basura' }));
+    const vacio = await setup().call(validBody({ website: '', turnstileToken: 'basura' }));
+    expect(lleno.statusCode).toBe(403);
+    expect(vacio.statusCode).toBe(403);
+    expect(lleno.body).toBe(vacio.body);
+    expect(json(lleno)).toEqual({ error: 'captcha_failed' });
+  });
+
+  it('un honeypot lleno con captcha válido sí verifica el captcha una vez', async () => {
+    const s = setup();
+    await s.call(validBody({ website: 'x' }));
+    expect(s.verifyCalls).toHaveLength(1);
+  });
+
+  describe('folio señuelo: cerca del real (contador actual + 1 a 5)', () => {
+    const numero = (res: { body?: string | undefined }) =>
+      Number((json(res).folio as string).split('-')[2]);
+
+    it.each([
+      [0, 0, 1],
+      [0.999, 0, 5],
+      [0, 41, 42],
+      [0.5, 41, 44],
+      [0.999, 41, 46],
+    ])('azar %s con el contador en %i -> %i', async (azar, contador, esperado) => {
+      const s = setup({ random: () => azar });
+      if (contador > 0) s.repo.counters.set(2026, contador);
+      expect(numero(await s.call(validBody({ website: 'x' })))).toBe(esperado);
+    });
+
+    it('cruza de 5 a 6 dígitos sin romper el formato', async () => {
+      const s = setup({ random: () => 0 });
+      s.repo.counters.set(2026, 99_999);
+      expect(json(await s.call(validBody({ website: 'x' }))).folio).toBe('CN-2026-100000');
+    });
+
+    it('en la frontera del tope no se pasa de MAX_FOLIO_NUMBER', async () => {
+      const s = setup({ random: () => 0.999 });
+      s.repo.counters.set(2026, MAX_FOLIO_NUMBER - 1);
+      const res = await s.call(validBody({ website: 'x' }));
+      expect(res.statusCode).toBe(201);
+      expect(numero(res)).toBe(MAX_FOLIO_NUMBER);
+    });
+
+    it('si no se puede leer el contador igual responde 201 con un folio de forma válida', async () => {
+      const s = setup();
+      s.repo.failOn.set('peekFolioNumber', new Error('boom'));
+      const res = await s.call(validBody({ website: 'x' }));
+      expect(res.statusCode).toBe(201);
+      expect(json(res).folio).toMatch(FOLIO_PATTERN);
+      expect(s.repo.quotes.size).toBe(0);
+    });
+  });
+
+  it('no consume cupo: muchos envíos con honeypot no gastan el límite del correo ni de la IP', async () => {
+    const s = setup();
+    for (let i = 0; i < MAX_QUOTES_PER_IP_PER_DAY + 5; i++) {
+      expect((await s.call(validBody({ website: 'x' }))).statusCode).toBe(201);
+    }
+    expect(s.repo.rateLimits.size).toBe(0);
+    expect((await s.call(validBody())).statusCode).toBe(201);
+  });
+
+  it('el log solo dice que se detectó (sin PII)', async () => {
     const s = setup();
     await s.call(validBody({ website: 'x' }));
     const todo = s.logs.join('\n');
     expect(todo).toContain('honeypot_triggered');
-    for (const v of [SENTINEL.correo, SENTINEL.nombre, SENTINEL.telefono])
+    for (const v of [SENTINEL.correo, SENTINEL.nombre, SENTINEL.telefono, '203.0.113.7'])
       expect(todo).not.toContain(v);
   });
 
@@ -467,6 +551,164 @@ describe('honeypot', () => {
     const res = await s.call(validBody({ website: '   ' }));
     expect(res.statusCode).toBe(201);
     expect(s.repo.quotes.size).toBe(1);
+  });
+});
+
+describe('límite de solicitudes por correo y por IP', () => {
+  const sha = (t: string) => createHash('sha256').update(t).digest('hex');
+  const conCorreo = (correo: string, over: Record<string, unknown> = {}) =>
+    validBody({
+      customer: { nombre: SENTINEL.nombre, telefono: SENTINEL.telefono, correo },
+      ...over,
+    });
+  let ipN = 0;
+  const ipNueva = () => `198.51.100.${(ipN++ % 250) + 1}`;
+
+  it('los topes son 5 por correo y 20 por IP al día', () => {
+    expect(MAX_QUOTES_PER_EMAIL_PER_DAY).toBe(5);
+    expect(MAX_QUOTES_PER_IP_PER_DAY).toBe(20);
+  });
+
+  it('el correo permite 5 y la sexta da 429 rate_limited en español, sin guardar, sin correos y sin gastar folio', async () => {
+    const s = setup();
+    for (let i = 0; i < 5; i++) {
+      expect((await s.call(conCorreo(SENTINEL.correo), { sourceIp: ipNueva() })).statusCode).toBe(
+        201,
+      );
+    }
+    const enviados = s.sent.length;
+    const antes = s.repo.calls.length;
+    const res = await s.call(conCorreo(SENTINEL.correo), { sourceIp: ipNueva() });
+    expect(res.statusCode).toBe(429);
+    expect(json(res).error).toBe('rate_limited');
+    expect(String(json(res).message)).toMatch(/demasiadas solicitudes/i);
+    expect(String(json(res).message)).not.toMatch(/too many|rate/i);
+    expect(res.body).not.toContain(SENTINEL.correo);
+    expect(s.repo.quotes.size).toBe(5);
+    expect(s.repo.counters.get(2026)).toBe(5);
+    expect(s.sent).toHaveLength(enviados);
+    // Nunca se llegó a reservar folio ni a guardar.
+    const nuevas = s.repo.calls.slice(antes);
+    expect(nuevas).not.toContain('reserveFolioNumber');
+    expect(nuevas).not.toContain('putQuote');
+  });
+
+  it('el 429 trae retry-after con los segundos hasta las 00:00 UTC', async () => {
+    const s = setup();
+    for (let i = 0; i < 5; i++) await s.call(conCorreo(SENTINEL.correo), { sourceIp: ipNueva() });
+    const res = await s.call(conCorreo(SENTINEL.correo), { sourceIp: ipNueva() });
+    // NOW = 15:30 UTC -> faltan 8 h 30 min.
+    expect(res.headers?.['retry-after']).toBe(String(8.5 * 3600));
+  });
+
+  it('mayúsculas, espacios y +etiqueta comparten el mismo cupo de correo', async () => {
+    const s = setup();
+    const variantes = [
+      'Ana@Ejemplo.mx',
+      'ana@ejemplo.mx',
+      'ana+uno@ejemplo.mx',
+      'ANA+dos@EJEMPLO.MX',
+      'ana+z@ejemplo.mx',
+    ];
+    for (const c of variantes) {
+      expect((await s.call(conCorreo(c), { sourceIp: ipNueva() })).statusCode, c).toBe(201);
+    }
+    expect(
+      (await s.call(conCorreo('ana+otra@ejemplo.mx'), { sourceIp: ipNueva() })).statusCode,
+    ).toBe(429);
+    expect(s.repo.quotes.size).toBe(5);
+  });
+
+  it('otro correo no se ve afectado por el límite de ese correo', async () => {
+    const s = setup();
+    for (let i = 0; i < 6; i++) await s.call(conCorreo('uno@ejemplo.mx'), { sourceIp: ipNueva() });
+    expect((await s.call(conCorreo('dos@ejemplo.mx'), { sourceIp: ipNueva() })).statusCode).toBe(
+      201,
+    );
+  });
+
+  it('la IP permite 20 y la 21 da 429, aunque cada solicitud use un correo distinto', async () => {
+    const s = setup();
+    for (let i = 0; i < 20; i++) {
+      const res = await s.call(conCorreo(`persona${i}@ejemplo.mx`), { sourceIp: '203.0.113.50' });
+      expect(res.statusCode, String(i)).toBe(201);
+    }
+    const res = await s.call(conCorreo('persona99@ejemplo.mx'), { sourceIp: '203.0.113.50' });
+    expect(res.statusCode).toBe(429);
+    expect(json(res).error).toBe('rate_limited');
+    expect(s.repo.quotes.size).toBe(20);
+    expect(s.repo.counters.get(2026)).toBe(20);
+    // Otra IP sigue funcionando.
+    expect(
+      (await s.call(conCorreo('persona100@ejemplo.mx'), { sourceIp: '203.0.113.51' })).statusCode,
+    ).toBe(201);
+  });
+
+  it('las claves son `rate#email#<sha256 del correo normalizado>#<día UTC>` y `rate#ip#<sha256 de la IP>#<día UTC>`, con ttl de 2 días y sin PII', async () => {
+    const s = setup();
+    await s.call(conCorreo('Ana+x@Ejemplo.mx'), { sourceIp: '203.0.113.7' });
+    const claves = [...s.repo.rateLimits.keys()].sort();
+    expect(claves).toEqual(
+      [
+        `rate#email#${sha('ana@ejemplo.mx')}#2026-11-20`,
+        `rate#ip#${sha('203.0.113.7')}#2026-11-20`,
+      ].sort(),
+    );
+    for (const k of claves) {
+      expect(k).not.toContain('ejemplo');
+      expect(k).not.toContain('203.0.113.7');
+      expect(s.repo.rateLimits.get(k)).toEqual({
+        value: 1,
+        ttl: Math.floor(NOW.getTime() / 1000) + 2 * 24 * 60 * 60,
+      });
+    }
+  });
+
+  it('el cupo es por día UTC: al día siguiente se reinicia', async () => {
+    let ahora = NOW;
+    const s = setup({ now: () => ahora });
+    for (let i = 0; i < 5; i++) await s.call(conCorreo('a@ejemplo.mx'), { sourceIp: ipNueva() });
+    expect((await s.call(conCorreo('a@ejemplo.mx'), { sourceIp: ipNueva() })).statusCode).toBe(429);
+    ahora = new Date('2026-11-21T00:00:01.000Z');
+    expect((await s.call(conCorreo('a@ejemplo.mx'), { sourceIp: ipNueva() })).statusCode).toBe(201);
+  });
+
+  it('una petición inválida (422), con captcha malo o con piedras inválidas NO consume cupo', async () => {
+    const s = setup();
+    await s.call(validBody({ consent: false }));
+    await s.call(validBody({ turnstileToken: 'falso' }));
+    await s.call(validBody({ items: [{ stoneId: 'no-existe', cantidad: 1, unidad: 'tonelada' }] }));
+    expect(s.repo.rateLimits.size).toBe(0);
+  });
+
+  it('sin IP en el evento solo cuenta el correo (y ese límite sigue valiendo)', async () => {
+    const s = setup();
+    for (let i = 0; i < 5; i++) {
+      expect((await s.call(conCorreo('a@ejemplo.mx'), { sourceIp: null })).statusCode).toBe(201);
+    }
+    expect([...s.repo.rateLimits.keys()].every((k) => k.startsWith('rate#email#'))).toBe(true);
+    expect((await s.call(conCorreo('a@ejemplo.mx'), { sourceIp: null })).statusCode).toBe(429);
+  });
+
+  it('el log del 429 no trae PII (ni correo ni IP) y dice qué límite fue', async () => {
+    const s = setup();
+    for (let i = 0; i < 6; i++)
+      await s.call(conCorreo(SENTINEL.correo), { sourceIp: '203.0.113.7' });
+    const todo = s.logs.join('\n');
+    expect(todo).toContain('rate_limited');
+    for (const v of [SENTINEL.correo, '203.0.113.7', SENTINEL.nombre])
+      expect(todo).not.toContain(v);
+  });
+
+  it('un fallo del contador de límite es 500 (falla cerrado): nada guardado, ni folio, ni correos', async () => {
+    const s = setup();
+    s.repo.failOn.set('consumeRateLimit', new Error(`boom ${SENTINEL.correo}`));
+    const res = await s.call(validBody());
+    expect(res.statusCode).toBe(500);
+    expect(s.repo.quotes.size).toBe(0);
+    expect(s.repo.counters.size).toBe(0);
+    expect(s.sent).toEqual([]);
+    expect(res.body).not.toContain(SENTINEL.correo);
   });
 });
 
@@ -650,9 +892,9 @@ describe('piedras y tarifa', () => {
 });
 
 describe('fallos de infraestructura', () => {
-  it('contador agotado (99 999): 503 quotes_unavailable, nada guardado ni enviado', async () => {
+  it('contador agotado (999 999): 503 quotes_unavailable, nada guardado ni enviado', async () => {
     const s = setup();
-    s.repo.counters.set(2026, 99_999);
+    s.repo.counters.set(2026, MAX_FOLIO_NUMBER);
     const res = await s.call(validBody());
     expect(res.statusCode).toBe(503);
     expect(json(res)).toEqual({ error: 'quotes_unavailable' });
@@ -660,15 +902,22 @@ describe('fallos de infraestructura', () => {
     expect(s.sent).toEqual([]);
   });
 
-  it('el folio 99 999 todavía se concede', async () => {
+  it.each([
+    [99_998, 'CN-2026-99999'],
+    [99_999, 'CN-2026-100000'],
+    [MAX_FOLIO_NUMBER - 1, 'CN-2026-999999'],
+  ])('con el contador en %i el folio concedido es %s (5 y 6 dígitos)', async (contador, folio) => {
     const s = setup();
-    s.repo.counters.set(2026, 99_998);
-    expect(json(await s.call(validBody())).folio).toBe('CN-2026-99999');
+    s.repo.counters.set(2026, contador);
+    const res = await s.call(validBody());
+    expect(res.statusCode).toBe(201);
+    expect(json(res).folio).toBe(folio);
+    expect(storedQuote(s.repo)['folio']).toBe(folio);
   });
 
-  it('un contador que devuelve más de 99 999: 503 (defensa en profundidad)', async () => {
+  it('un contador que devuelve más de 999 999: 503 (defensa en profundidad)', async () => {
     const s = setup();
-    vi.spyOn(s.repo, 'reserveFolioNumber').mockResolvedValue(100_000);
+    vi.spyOn(s.repo, 'reserveFolioNumber').mockResolvedValue(1_000_000);
     expect((await s.call(validBody())).statusCode).toBe(503);
     expect(s.repo.quotes.size).toBe(0);
   });

@@ -52,6 +52,17 @@ describe('DataStack', () => {
     expect(keySchemas).toContainEqual(claves);
   });
 
+  it('solo Counters tiene TTL, sobre el atributo `ttl` (contadores del límite de solicitudes)', () => {
+    const tablas = synth('dev').findResources('AWS::DynamoDB::Table');
+    const conTtl = Object.entries(tablas).filter(
+      ([, t]) => t.Properties.TimeToLiveSpecification !== undefined,
+    );
+    expect(conTtl).toHaveLength(1);
+    const [id, t] = conTtl[0]!;
+    expect(id).toMatch(/^Counters/);
+    expect(t.Properties.TimeToLiveSpecification).toEqual({ AttributeName: 'ttl', Enabled: true });
+  });
+
   it('todas las tablas son PAY_PER_REQUEST', () => {
     const tablas = Object.values(synth('dev').findResources('AWS::DynamoDB::Table'));
     expect(tablas).toHaveLength(10);

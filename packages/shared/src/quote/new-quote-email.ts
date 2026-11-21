@@ -44,7 +44,14 @@ function detailLink(adminBaseUrl: string | undefined, quoteId: string): string |
   return `${base}/quotes/${quoteId}`;
 }
 
-/** Confirmación al cliente: folio, resumen de piedras (sin precios) y la promesa de 48 h. */
+const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
+
+/**
+ * Confirmación al cliente. El destinatario lo escribe cualquiera en un formulario público, así que
+ * este correo es un posible relevo de phishing: NO lleva NINGÚN texto libre del cliente (ni nombre,
+ * ni lugar, uso, notas o teléfono). Solo folio, piedras con el nombre del catálogo, cantidades, el
+ * estimado de flete si existe y los datos del patio (todo lo decide el servidor).
+ */
 export function buildCustomerConfirmationEmail(input: {
   quote: Quote;
   publicSettings: PublicSettings;
@@ -54,18 +61,23 @@ export function buildCustomerConfirmationEmail(input: {
   if (!isValidRecipient(quote.customer.correo)) {
     throw new Error('El destinatario no es un correo válido.');
   }
-  const nombre = oneLine(quote.customer.nombre);
   const lines = stoneLines(quote);
-  const intro = `Hola ${nombre},`;
+  const intro = 'Hola,';
   const body = [
-    `Recibimos tu solicitud de cotización con el folio ${quote.folio}. Guárdalo para cualquier consulta.`,
-    'Piedras que pediste:',
+    `Recibimos una solicitud de cotización con el folio ${quote.folio}. Guárdalo para cualquier consulta.`,
+    'Piedras solicitadas:',
   ];
-  const obra = `Lugar de la obra: ${quote.works.lugar} (C. P. ${quote.works.codigoPostal})`;
+  const estimate =
+    quote.freight === undefined
+      ? null
+      : `Estimado de flete: ${money.format(quote.freight.estimadoMin)} a ${money.format(quote.freight.estimadoMax)} MXN (estimado sujeto a confirmación).`;
   const promesa =
-    'Un asesor te responderá en menos de 48 horas. Los precios y el flete se confirman en la cotización que recibirás; este correo no incluye importes.';
+    estimate === null
+      ? 'Un asesor te responderá en menos de 48 horas. Los precios y el flete se confirman en la cotización que recibirás; este correo no incluye importes.'
+      : 'Un asesor te responderá en menos de 48 horas. Los precios y el flete se confirman en la cotización que recibirás.';
   const footerLines = [
     `— ${oneLine(pub.nombrePatio)}`,
+    `Dirección: ${oneLine(pub.direccion)}`,
     `Horario: ${oneLine(pub.horario)}`,
     `WhatsApp: https://wa.me/${pub.whatsapp}`,
   ];
@@ -78,8 +90,7 @@ export function buildCustomerConfirmationEmail(input: {
     body[1],
     ...lines.map((l) => `- ${l}`),
     '',
-    obra,
-    '',
+    ...(estimate === null ? [] : [estimate, '']),
     promesa,
     '',
     ...footerLines,
@@ -92,7 +103,7 @@ export function buildCustomerConfirmationEmail(input: {
       `<p>${escapeHtml(body[0] as string)}</p>`,
       `<p>${escapeHtml(body[1] as string)}</p>`,
       `<ul>${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`,
-      `<p>${escapeHtml(obra)}</p>`,
+      ...(estimate === null ? [] : [`<p>${escapeHtml(estimate)}</p>`]),
       `<p>${escapeHtml(promesa)}</p>`,
       `<p>${footerLines.map((l) => escapeHtml(l)).join('<br>\n')}</p>`,
     ].join('\n'),
@@ -128,13 +139,16 @@ export function buildOwnerNotificationEmail(input: {
     `Código postal: ${works.codigoPostal}`,
     `Uso: ${works.uso === '' ? '(sin especificar)' : works.uso}`,
   ];
-  const notas =
-    works.notas === '' ? 'Notas del cliente: (sin notas)' : `Notas del cliente:\n${works.notas}`;
+  // Las notas son texto libre del cliente (pueden imitar un enlace o instrucciones): van como bloque
+  // citado, cada línea con `> `, y el enlace REAL va al principio del correo, antes de cualquier dato.
+  const quoted = works.notas === '' ? null : works.notas.split(/\r?\n/).map((l) => `> ${l}`);
+  const notasHead = quoted === null ? 'Notas del cliente: (sin notas)' : 'Notas del cliente:';
   const lines = stoneLines(quote);
   const reply =
     'Responde en menos de 48 horas; los precios y el flete se capturan en la cotización.';
 
   const text = [
+    ...(link === null ? [] : [`Ver y cotizar en el dashboard: ${link}`, '']),
     head,
     '',
     ...dataLines,
@@ -142,24 +156,29 @@ export function buildOwnerNotificationEmail(input: {
     'Piedras:',
     ...lines.map((l) => `- ${l}`),
     '',
-    notas,
+    notasHead,
+    ...(quoted ?? []),
     '',
     reply,
-    ...(link === null ? [] : ['', `Ver y cotizar en el dashboard: ${link}`]),
     '',
   ].join('\n');
 
   const html = wrapHtml(
     [
+      ...(link === null
+        ? []
+        : [`<p><a href="${escapeHtml(link)}">Ver y cotizar en el dashboard</a></p>`]),
       `<p>${escapeHtml(head)}</p>`,
       `<p>${dataLines.map((l) => escapeHtml(l)).join('<br>\n')}</p>`,
       '<p>Piedras:</p>',
       `<ul>${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`,
-      `<p>${toHtml(escapeHtml(notas))}</p>`,
-      `<p>${escapeHtml(reply)}</p>`,
-      ...(link === null
+      `<p>${escapeHtml(notasHead)}</p>`,
+      ...(quoted === null
         ? []
-        : [`<p><a href="${escapeHtml(link)}">Ver y cotizar en el dashboard</a></p>`]),
+        : [
+            `<blockquote style="margin:0 0 1em;padding-left:1em;border-left:3px solid #999;color:#444">${toHtml(escapeHtml(works.notas))}</blockquote>`,
+          ]),
+      `<p>${escapeHtml(reply)}</p>`,
     ].join('\n'),
   );
 

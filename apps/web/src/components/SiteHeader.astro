@@ -1,7 +1,4 @@
 ---
-// Por ahora el contador de cotización siempre es 0: la lista real (localStorage) es otra tarea.
-const quoteCount = 0;
-
 const links = [
   { href: '/services/', label: 'Servicios' },
   { href: '/catalog/', label: 'Piedras' },
@@ -31,9 +28,10 @@ const current = (href: string) => {
         </a>
       ))}
     </nav>
-    <a class="btn btn-primary" href="/contact/">
-      Cotización · {quoteCount}
+    <a class="btn btn-primary" href="/quote/">
+      Cotización · <span data-quote-count>0</span>
     </a>
+    <span class="sr-only" role="status" aria-live="polite" data-quote-live></span>
     <details class="menu">
       <summary>Menú</summary>
       <nav class="menu__list" aria-label="Principal (móvil)">
@@ -46,3 +44,7 @@ const current = (href: string) => {
     </details>
   </div>
 </header>
+
+<script>
+  import '../scripts/quote-counter';
+</script>
