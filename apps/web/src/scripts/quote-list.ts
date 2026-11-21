@@ -23,44 +23,77 @@ const storedItemSchema = z.object({
 });
 const storedListSchema = z.object({
   v: z.literal(1),
-  items: z.array(storedItemSchema).max(MAX_ITEMS),
+  items: z.array(z.unknown()),
 });
 
 export type QuoteListItem = z.infer<typeof storedItemSchema>;
 export type AddResult = 'added' | 'exists' | 'full';
 
-// Copia en memoria: respaldo cuando no hay `localStorage`.
+// Copia en memoria: respaldo cuando no hay `localStorage` o no se puede escribir en él.
 let memory: QuoteListItem[] = [];
+// Si `setItem` falla (cuota, modo privado) se deja de leer el almacenamiento: su valor sería viejo
+// y pisaría la copia en memoria.
+let storageBroken = false;
 
 function readStorage(): QuoteListItem[] | undefined {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw === null) return [];
     const parsed = storedListSchema.safeParse(JSON.parse(raw));
-    // Datos corruptos o de otra forma: se tratan como lista vacía (no se rompe el sitio).
-    return parsed.success ? parsed.data.items : [];
+    if (!parsed.success) return []; // forma desconocida: lista vacía
+    // Se valida por elemento: uno corrupto se descarta sin vaciar toda la lista.
+    const items: QuoteListItem[] = [];
+    for (const raw of parsed.data.items) {
+      const item = storedItemSchema.safeParse(raw);
+      if (item.success && !items.some((i) => i.stoneId === item.data.stoneId)) {
+        items.push(item.data);
+      }
+    }
+    return items.slice(0, MAX_ITEMS);
   } catch {
     return undefined; // sin acceso a localStorage
   }
 }
 
 export function getItems(): QuoteListItem[] {
-  const stored = readStorage();
-  if (stored !== undefined) {
-    memory = stored;
-    return stored.map((i) => ({ ...i }));
+  if (!storageBroken) {
+    const stored = readStorage();
+    if (stored !== undefined) {
+      memory = stored;
+      return stored.map((i) => ({ ...i }));
+    }
+    storageBroken = true;
   }
   return memory.map((i) => ({ ...i }));
 }
 
 function save(items: QuoteListItem[]): void {
   memory = items;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, items }));
-  } catch {
-    // Sin almacenamiento: queda solo en memoria.
+  if (!storageBroken) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, items }));
+    } catch {
+      storageBroken = true; // desde aquí solo vive en memoria
+    }
   }
   window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+}
+
+/**
+ * `true` si la lista puede conservarse entre páginas. Prueba escribir una clave aparte; si falla,
+ * la lista solo vive en memoria y se pierde al cambiar de página.
+ */
+export function isPersistent(): boolean {
+  if (storageBroken) return false;
+  try {
+    const probe = `${STORAGE_KEY}:probe`;
+    window.localStorage.setItem(probe, '1');
+    window.localStorage.removeItem(probe);
+    return true;
+  } catch {
+    storageBroken = true;
+    return false;
+  }
 }
 
 export function addItem(item: QuoteListItem): AddResult {

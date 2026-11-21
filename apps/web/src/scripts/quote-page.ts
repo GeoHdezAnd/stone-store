@@ -7,11 +7,13 @@ import {
 import {
   clearItems,
   getItems,
+  isPersistent,
   onExternalChange,
   removeItem,
   updateItem,
   type QuoteListItem,
 } from './quote-list';
+import { parseQuantity } from './quantity';
 import { buildWhatsAppUrl } from './whatsapp';
 
 // Página /quote/: lista editable + formulario de cotización (CLAUDE.md 5.1, pasos 4 a 7).
@@ -26,6 +28,7 @@ interface StoneInfo {
   nombre: string;
   vendidaPor: SoldByUnit[];
   espesoresCm: number[];
+  acabados: string[];
 }
 
 const API_URL = (import.meta.env.PUBLIC_API_URL ?? '').trim().replace(/\/+$/, '');
@@ -60,19 +63,25 @@ function init(app: HTMLElement): void {
   const doneView = q(app, '[data-view="done"]');
   const itemsList = q<HTMLOListElement>(app, '[data-items]');
   const emptyMsg = q(app, '[data-empty]');
-  const listCount = q(app, '[data-list-count]');
+  const listTitle = q(app, '[data-list-title]');
   const status = q(app, '[data-form-status]');
   const submit = q<HTMLButtonElement>(app, '[data-submit]');
   const waLink = q<HTMLAnchorElement>(app, '[data-whatsapp-link]');
 
   // ---------- Configuración ----------
   const apiConfigured = API_URL !== '';
-  const fakeCaptcha = SITE_KEY === FAKE_TURNSTILE_KEY;
-  const captchaConfigured = SITE_KEY !== '';
-  if (!apiConfigured || !captchaConfigured) {
-    q(app, '[data-config-warning]').hidden = false;
-    submit.disabled = true;
-  }
+  // `test-pass` solo vale como modo de prueba con una API local (Floci); con cualquier otra API se
+  // trata como clave no configurada, para que un build real no envíe un token falso.
+  const localApi =
+    /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/.test(API_URL) ||
+    API_URL.startsWith('/_aws');
+  const fakeCaptcha = SITE_KEY === FAKE_TURNSTILE_KEY && localApi;
+  const captchaConfigured = SITE_KEY !== '' && (SITE_KEY !== FAKE_TURNSTILE_KEY || localApi);
+  const canSubmit = apiConfigured && captchaConfigured;
+  if (!canSubmit) q(app, '[data-config-warning]').hidden = false;
+  // El botón viene deshabilitado en el HTML: sin JS no hay forma de enviar el formulario.
+  submit.disabled = !canSubmit;
+  if (!isPersistent()) q(app, '[data-persist-warning]').hidden = false;
 
   // ---------- Errores por campo ----------
   const errorEl = (id: string) => document.getElementById(id);
@@ -88,7 +97,8 @@ function init(app: HTMLElement): void {
       }
       return;
     }
-    control?.setAttribute('aria-invalid', 'true');
+    // El contenedor del widget no es un control: solo se muestra el mensaje (role="alert").
+    if (controlId !== 'turnstile-widget') control?.setAttribute('aria-invalid', 'true');
     if (error) {
       error.textContent = message;
       error.hidden = false;
@@ -149,27 +159,26 @@ function init(app: HTMLElement): void {
     return undefined;
   }
 
+  // El resumen es `role="alert"`: se anuncia solo, sin mover el foco (evita el doble anuncio).
   function showStatus(message: string): void {
     status.textContent = message;
     status.hidden = false;
+    status.scrollIntoView({ block: 'center' });
   }
 
   /** Foco al primer control inválido (en orden del documento); si no hay, al resumen. */
   function focusFirstProblem(): void {
     const first = form.querySelector<HTMLElement>('[aria-invalid="true"]');
-    if (first && first.id !== 'turnstile-widget') {
-      first.focus();
-      return;
-    }
-    if (!status.hidden) {
-      status.focus();
-      return;
-    }
-    first?.scrollIntoView({ block: 'center' });
+    if (first) first.focus();
   }
 
   // ---------- Lista de piedras ----------
-  function makeField(labelText: string, control: HTMLElement, errorId: string): HTMLElement {
+  function makeField(
+    labelText: string,
+    control: HTMLElement,
+    errorId: string,
+    hintText?: string,
+  ): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'field';
     const label = document.createElement('label');
@@ -179,24 +188,44 @@ function init(app: HTMLElement): void {
     error.className = 'error';
     error.id = errorId;
     error.hidden = true;
+    if (hintText) {
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.id = `${errorId}-hint`;
+      hint.textContent = hintText;
+      control.setAttribute('aria-describedby', `${hint.id} ${errorId}`);
+      wrap.append(label, control, hint, error);
+      return wrap;
+    }
     control.setAttribute('aria-describedby', errorId);
     wrap.append(label, control, error);
     return wrap;
   }
 
   function renderItems(): void {
-    // Las piedras que ya no están en el catálogo se quitan: el servidor las rechazaría.
+    // Las piedras que ya no están en el catálogo se descartan: el servidor las rechazaría.
     for (const stale of getItems().filter((i) => !stones.has(i.stoneId))) removeItem(stale.stoneId);
-    const items = getItems();
+    // Un acabado que la piedra ya no ofrece se quita (igual que unidad y espesor, que se normalizan
+    // al dibujar la fila).
+    for (const i of liveItems()) {
+      if (i.acabado !== undefined && !stones.get(i.stoneId)!.acabados.includes(i.acabado)) {
+        updateItem(i.stoneId, { acabado: undefined });
+      }
+    }
+    const items = liveItems();
     itemsList.replaceChildren();
-    listCount.textContent = String(items.length);
+    listTitle.textContent = `Tu lista · ${items.length} ${items.length === 1 ? 'piedra' : 'piedras'}`;
     emptyMsg.hidden = items.length > 0;
-    for (const item of items) itemsList.append(renderItem(item));
+    for (const item of items) itemsList.append(renderItem(item, stones.get(item.stoneId)!));
     refreshWhatsApp();
   }
 
-  function renderItem(item: QuoteListItem): HTMLElement {
-    const info = stones.get(item.stoneId)!;
+  /** Piedras de la lista que siguen en el catálogo (nunca revienta con una piedra retirada). */
+  function liveItems(): QuoteListItem[] {
+    return getItems().filter((i) => stones.has(i.stoneId));
+  }
+
+  function renderItem(item: QuoteListItem, info: StoneInfo): HTMLElement {
     const li = document.createElement('li');
     li.className = 'quote-item';
 
@@ -271,7 +300,12 @@ function init(app: HTMLElement): void {
       thickness.value = String(item.espesorCm);
     }
 
-    const qtyField = makeField('Cantidad aproximada', qty, `item-${item.stoneId}-cantidad-error`);
+    const qtyField = makeField(
+      'Cantidad aproximada',
+      qty,
+      `item-${item.stoneId}-cantidad-error`,
+      'Solo números, por ejemplo 1500 o 1,500.5',
+    );
     const unitField = makeField('Unidad', unit, `item-${item.stoneId}-unidad-error`);
     const thickField = makeField('Espesor', thickness, `item-${item.stoneId}-espesor-error`);
     thickField.hidden = unit.value !== 'm2';
@@ -297,15 +331,9 @@ function init(app: HTMLElement): void {
     return li;
   }
 
-  /** Acepta «1,5» y «1.5». Vacío da `NaN` (el esquema lo reporta como número inválido). */
-  function parseQuantity(raw: string): number {
-    const t = raw.trim().replace(',', '.');
-    return t === '' ? Number.NaN : Number(t);
-  }
-
   // ---------- WhatsApp ----------
   function currentItemsForMessage() {
-    return getItems().map((i) => ({
+    return liveItems().map((i) => ({
       nombre: stones.get(i.stoneId)?.nombre ?? i.nombre,
       acabado: i.acabado,
       cantidad: i.cantidad,
@@ -323,7 +351,7 @@ function init(app: HTMLElement): void {
   // ---------- Cuerpo del pedido desde el DOM ----------
   function buildPayload(token: string) {
     const val = (id: string) => q<HTMLInputElement>(form, `#${id}`).value;
-    const items = getItems().map((i) => {
+    const items = liveItems().map((i) => {
       const unit = q<HTMLSelectElement>(form, `#item-${i.stoneId}-unidad`).value;
       const item: Record<string, unknown> = {
         stoneId: i.stoneId,
@@ -337,13 +365,13 @@ function init(app: HTMLElement): void {
       }
       return item;
     });
-    const works: Record<string, unknown> = {
+    const works = {
       lugar: val('f-lugar'),
       codigoPostal: val('f-cp').trim(),
+      // El esquema exige la clave `uso` (puede ir vacía).
+      uso: val('f-uso'),
       notas: val('f-notas'),
     };
-    const uso = val('f-uso');
-    if (uso !== '') works['uso'] = uso;
     return {
       customer: { nombre: val('f-nombre'), telefono: val('f-telefono'), correo: val('f-correo') },
       works,
@@ -435,7 +463,7 @@ function init(app: HTMLElement): void {
 
   async function handleSubmit(): Promise<void> {
     clearErrors();
-    const sentIds = getItems().map((i) => i.stoneId);
+    const sentIds = liveItems().map((i) => i.stoneId);
     const parsed = createQuoteRequestSchema.safeParse(buildPayload(token));
     if (!parsed.success) {
       const seen = new Set<string>();
@@ -469,7 +497,6 @@ function init(app: HTMLElement): void {
       showStatus(
         `No pudimos enviar tu solicitud. Revisa tu conexión e inténtalo de nuevo. ${whatsappAlternative()}`,
       );
-      status.focus();
     } finally {
       submitting = false;
       submit.disabled = !apiConfigured || !captchaConfigured;
@@ -524,19 +551,16 @@ function init(app: HTMLElement): void {
     if (res.status === 403) {
       showStatus('No pudimos verificar que eres una persona. Inténtalo de nuevo.');
       setCaptchaError('Completa la verificación anti-spam otra vez.');
-      status.focus();
       return;
     }
     if (res.status === 429) {
       showStatus(`Recibimos demasiadas solicitudes. Intenta más tarde. ${whatsappAlternative()}`);
-      status.focus();
       return;
     }
     // 400, 413, 415, 503, 5xx y cualquier otro código.
     showStatus(
       `No pudimos enviar tu solicitud en este momento. Inténtalo más tarde. ${whatsappAlternative()}`,
     );
-    status.focus();
   }
 
   function showDone(folio: string | undefined): void {

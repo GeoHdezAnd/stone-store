@@ -15,6 +15,7 @@ const stones = catalog.stones.map((s) => ({
   nombre: s.nombre,
   vendidaPor: s.vendidaPor,
   espesoresCm: s.espesoresCm,
+  acabados: s.acabados,
 }));
 
 // «Para qué es»: las categorías de uso del catálogo y el motivo «visita» (`?motivo=visita`).
@@ -53,6 +54,14 @@ const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
             .
           </p>
         </noscript>
+        <p class="notice notice--error" role="note" data-persist-warning hidden>
+          Tu navegador no permite guardar la lista entre páginas. Termina tu solicitud en esta
+          página o escríbenos por
+          <a href={`https://wa.me/${whatsapp}`} rel="noopener">
+            WhatsApp
+          </a>
+          .
+        </p>
         <p class="notice notice--error" role="alert" data-config-warning hidden>
           El envío de solicitudes no está configurado en este sitio. Escríbenos por
           <a href={`https://wa.me/${whatsapp}`} rel="noopener">
@@ -61,7 +70,7 @@ const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
           .
         </p>
 
-        <form class="quote-form" data-quote-form novalidate>
+        <form class="quote-form" data-quote-form method="post" novalidate>
           <div
             class="notice notice--error"
             role="alert"
@@ -71,8 +80,8 @@ const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
           ></div>
 
           <section class="quote-form__section" aria-labelledby="list-title">
-            <h2 id="list-title" class="label">
-              Tu lista · <span data-list-count>0</span> piedras
+            <h2 id="list-title" class="label" data-list-title>
+              Tu lista · 0 piedras
             </h2>
             <ol class="quote-items" data-items></ol>
             <p class="empty-list" data-empty hidden>
@@ -215,7 +224,10 @@ const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
                   aria-describedby="f-consent-error"
                 />
                 <span>
-                  Acepto el <a href="/aviso-de-privacidad/">aviso de privacidad</a>
+                  Acepto el{' '}
+                  <a href="/aviso-de-privacidad/" target="_blank" rel="noopener">
+                    aviso de privacidad
+                  </a>
                 </span>
               </label>
               <span class="error" id="f-consent-error" hidden></span>
@@ -233,7 +245,7 @@ const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
             </p>
 
             <div class="btn-row">
-              <button type="submit" class="btn btn-primary" data-submit>
+              <button type="submit" class="btn btn-primary" disabled data-submit>
                 Enviar solicitud
               </button>
               <a

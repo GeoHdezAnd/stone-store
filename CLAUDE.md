@@ -139,7 +139,6 @@ Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 d
   "origen": "Sedimentaria",
   "tipoRoca": "Roca sedimentaria",
   "colores": ["Beige", "Crema", "Albero"],
-  "usos": ["Fachada", "Sillería", "Torneado", "Balaustre"],
   "categoriasUso": ["fachadas", "muros-silleria"],
   "acabados": ["Labrado", "Cepillado", "Rústico"],
   "formatos": ["Bloque", "Placa 60 × 40", "Corte a medida"],

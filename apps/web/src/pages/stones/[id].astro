@@ -67,7 +67,7 @@ const specs: [string, string][] = [
           ))}
         </ul>
 
-        <table class="table specs" style="margin-top: 28px">
+        <table class="table specs specs--spaced">
           <tbody>
             {specs.map(([k, v]) => (
               <tr>
@@ -110,6 +110,13 @@ const specs: [string, string][] = [
               Ver mi cotización
             </a>
           </div>
+          <p class="note" role="note" data-persist-warning hidden>
+            Tu navegador no permite guardar la lista entre páginas. Si prefieres, escríbenos por
+            <a href={`https://wa.me/${catalog.settings.whatsapp}`} rel="noopener">
+              WhatsApp
+            </a>
+            .
+          </p>
           <p class="note" role="status" data-add-status></p>
         </div>
         <p class="note" id="quote-hint">

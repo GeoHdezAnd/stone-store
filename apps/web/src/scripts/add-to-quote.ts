@@ -1,5 +1,5 @@
 import { SOLD_BY_UNITS, type SoldByUnit } from '@canteras/shared';
-import { addItem, getItems, type QuoteListItem } from './quote-list';
+import { addItem, getItems, isPersistent, type QuoteListItem } from './quote-list';
 
 // Botón «Agregar a cotización» de la ficha de piedra. Sin JavaScript el botón queda deshabilitado.
 
@@ -20,6 +20,10 @@ document.querySelectorAll<HTMLElement>('[data-add-to-quote]').forEach((root) => 
   const inList = () => getItems().some((i) => i.stoneId === stoneId);
 
   button.disabled = false;
+  if (!isPersistent()) {
+    const warning = root.querySelector<HTMLElement>('[data-persist-warning]');
+    if (warning) warning.hidden = false;
+  }
   if (inList()) say('Esta piedra ya está en tu lista de cotización.');
 
   button.addEventListener('click', () => {
