@@ -27,6 +27,7 @@ import {
   type Role,
 } from '@canteras/shared';
 import { buildAuditEntry, type AuditAction } from '../lib/audit';
+import { parseBound } from '../lib/date-bounds';
 import { csvResponse, HttpError, jsonResponse } from '../lib/http';
 import type { Mailer } from '../lib/mailer';
 import {
@@ -66,8 +67,6 @@ const MAX_CSV_BYTES = 5 * 1024 * 1024;
 // Tope del ítem serializado (UTF-8): DynamoDB admite 400 KB; se deja margen para las claves de índice.
 const MAX_ITEM_BYTES = 350_000;
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const LIST_PARAMS = ['status', 'q', 'from', 'to', 'limit', 'cursor'];
 const EXPORT_PARAMS = ['status', 'q', 'from', 'to'];
 
@@ -85,17 +84,6 @@ function tooLargeResponse(next: Quote): ReturnType<typeof jsonResponse> | null {
 const bad = (code: string): never => {
   throw new HttpError(400, code);
 };
-
-/** `YYYY-MM-DD` (día completo en UTC) o ISO con milisegundos. Devuelve el instante ISO. */
-function parseBound(raw: string, edge: 'from' | 'to'): string {
-  let iso: string;
-  if (DATE_RE.test(raw)) iso = edge === 'from' ? `${raw}T00:00:00.000Z` : `${raw}T23:59:59.999Z`;
-  else if (ISO_RE.test(raw)) iso = raw;
-  else return bad('invalid_query');
-  const t = Date.parse(iso);
-  if (Number.isNaN(t) || new Date(t).toISOString() !== iso) return bad('invalid_query');
-  return iso;
-}
 
 interface Filters {
   status?: QuoteStatus;

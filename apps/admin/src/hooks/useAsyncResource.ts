@@ -9,10 +9,14 @@ type State<T> =
  */
 export function useAsyncResource<T>(load: () => Promise<T>) {
   const [state, setState] = useState<State<T>>({ status: 'loading' });
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<unknown>(null);
   const run = useRef(0);
 
   const start = useCallback(() => {
     const id = ++run.current;
+    setRefreshing(false);
+    setRefreshError(null);
     setState({ status: 'loading' });
     load().then(
       (data) => {
@@ -31,16 +35,24 @@ export function useAsyncResource<T>(load: () => Promise<T>) {
     };
   }, [start]);
 
-  /** Vuelve a cargar sin pasar por «cargando»: conserva lo mostrado hasta tener lo nuevo. */
+  /**
+   * Vuelve a cargar sin pasar por «cargando»: conserva lo mostrado hasta tener lo nuevo. Si falla
+   * (p. ej. 429) NO lanza: deja el error en `refreshError` para que la pantalla lo avise, y lo
+   * mostrado se conserva. `refreshing` es true mientras recarga (para desactivar el botón).
+   */
   const refresh = useCallback(async () => {
     const id = ++run.current;
+    setRefreshing(true);
+    setRefreshError(null);
     try {
       const data = await load();
       if (id === run.current) setState({ status: 'ready', data });
-    } catch {
-      /* se conserva lo que ya se muestra */
+    } catch (error) {
+      if (id === run.current) setRefreshError(error);
+    } finally {
+      if (id === run.current) setRefreshing(false);
     }
   }, [load]);
 
-  return { state, reload: start, refresh };
+  return { state, reload: start, refresh, refreshing, refreshError };
 }

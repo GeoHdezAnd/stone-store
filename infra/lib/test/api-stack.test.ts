@@ -56,6 +56,7 @@ function build(opts: BuildOptions = {}): {
   const auth = new AuthStack(app, 'Auth', { deploy });
   const data = new DataStack(app, 'Data', { deploy });
   const media = new MediaStack(app, 'Media', {
+    skipSharpCheck: true,
     deploy,
     allowedOrigins: validateAllowedOrigins(deploy, allowedOrigins),
   });
@@ -163,6 +164,8 @@ describe('ApiStack: invariante de seguridad de las rutas', () => {
         'ANY /admin/freight/{proxy+}',
         'ANY /admin/me',
         'ANY /admin/me/{proxy+}',
+        'ANY /admin/metrics',
+        'ANY /admin/metrics/{proxy+}',
         'ANY /admin/media',
         'ANY /admin/media/{proxy+}',
         'ANY /admin/projects',
@@ -451,9 +454,9 @@ describe('ApiStack: Lambdas', () => {
     }
   });
 
-  it('hay 10 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
+  it('hay 11 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Lambda::Function', 10);
+    t.resourceCountIs('AWS::Lambda::Function', 11);
     t.allResourcesProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
       MemorySize: 256,
@@ -464,7 +467,7 @@ describe('ApiStack: Lambdas', () => {
 
   it('cada función tiene su log group con retención de 1 semana (sin logRetention)', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Logs::LogGroup', 10);
+    t.resourceCountIs('AWS::Logs::LogGroup', 11);
     t.allResourcesProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
     t.allResourcesProperties('AWS::Lambda::Function', {
       LoggingConfig: { LogGroup: { Ref: Match.stringLikeRegexp('Logs') } },
@@ -522,6 +525,8 @@ describe('ApiStack: Lambdas', () => {
       'POST /freight/estimate': /FreightEstimate/,
       'ANY /admin/quotes': /AdminQuotes/,
       'ANY /admin/quotes/{proxy+}': /AdminQuotes/,
+      'ANY /admin/metrics': /AdminMetrics/,
+      'ANY /admin/metrics/{proxy+}': /AdminMetrics/,
       ...Object.fromEntries(
         RECURSOS_CATALOGO.flatMap((x) => [
           [`ANY /admin/${x}`, /AdminCatalog/],
@@ -900,6 +905,7 @@ describe('ApiStack: Lambda AdminMedia', () => {
     const auth = new AuthStack(app, 'Auth', { deploy });
     const data = new DataStack(app, 'Data', { deploy });
     const media = new MediaStack(app, 'Media', {
+      skipSharpCheck: true,
       deploy,
       allowedOrigins: ['http://localhost:5173'],
     });
@@ -1092,6 +1098,7 @@ describe('ApiStack: Lambda AdminSettings', () => {
     const auth = new AuthStack(app, 'Auth', { deploy });
     const data = new DataStack(app, 'Data', { deploy });
     const media = new MediaStack(app, 'Media', {
+      skipSharpCheck: true,
       deploy,
       allowedOrigins: ['http://localhost:5173'],
     });
@@ -1396,6 +1403,8 @@ describe('ApiStack: throttling por ruta de media', () => {
       'ANY /admin/media/{proxy+}': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
       'POST /quotes': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
       'POST /freight/estimate': { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 },
+      'ANY /admin/metrics': { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 },
+      'ANY /admin/metrics/{proxy+}': { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 },
     });
   });
 
@@ -1408,7 +1417,13 @@ describe('ApiStack: throttling por ruta de media', () => {
       .sort();
     expect(reales).toHaveLength(2);
     expect(Object.keys(stage.Properties.RouteSettings).sort()).toEqual(
-      [...reales, 'POST /quotes', 'POST /freight/estimate'].sort(),
+      [
+        ...reales,
+        'POST /quotes',
+        'POST /freight/estimate',
+        'ANY /admin/metrics',
+        'ANY /admin/metrics/{proxy+}',
+      ].sort(),
     );
   });
 });
@@ -1548,6 +1563,7 @@ describe('ApiStack: Lambda AdminFreight', () => {
       'AdminSettings',
       'AdminPublish',
       'AdminQuotes',
+      'AdminMetrics',
     ]) {
       for (const s of sentenciasDe(t, f)) {
         if (!lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'))) continue;
@@ -2686,5 +2702,126 @@ describe('ApiStack: Lambda FreightEstimate (ruta pública)', () => {
       .CorsConfiguration as Json;
     expect(cors['AllowOrigins']).toContain('https://www.ejemplo.mx');
     expect(cors['AllowMethods']).toContain('POST');
+  });
+});
+
+describe('ApiStack: Lambda AdminMetrics (resumen del dashboard, solo lectura)', () => {
+  const RUTAS = ['ANY /admin/metrics', 'ANY /admin/metrics/{proxy+}'];
+
+  function conEntorno() {
+    const { stack, data } = build();
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminMetrics')]!;
+    const vars = (fn.Properties.Environment?.Variables ?? {}) as Record<string, Json>;
+    const ss = sentenciasDe(t, 'AdminMetrics').filter((s) =>
+      lista(s['Action']).some((a) => String(a).startsWith('dynamodb:')),
+    );
+    const idDe = (tb: Table): string => data.getLogicalId(tb.node.defaultChild as CfnTable);
+    return { t, dt, data, vars, ss, idDe };
+  }
+
+  it('las 2 rutas integran la Lambda AdminMetrics y son JWT', () => {
+    const t = synth();
+    const fn = idFuncion(t, 'AdminMetrics');
+    const integraciones = t.findResources('AWS::ApiGatewayV2::Integration');
+    const vistas: string[] = [];
+    for (const r of rutas(t)) {
+      const key = r['RouteKey'] as string;
+      if (!key.startsWith('ANY /admin/metrics')) continue;
+      expect(r['AuthorizationType'], key).toBe('JWT');
+      expect(r['AuthorizerId'], key).toBeDefined();
+      const target = JSON.stringify(r['Target']);
+      const idInt = Object.keys(integraciones).find((id) => target.includes(`"${id}"`))!;
+      expect(JSON.stringify(integraciones[idInt]!.Properties.IntegrationUri), key).toContain(
+        `"${fn}"`,
+      );
+      vistas.push(key);
+    }
+    expect(vistas.sort()).toEqual([...RUTAS].sort());
+  });
+
+  it('la invariante de seguridad sigue verde (no hay rutas públicas nuevas)', () => {
+    for (const emulated of [false, true])
+      expect(problemasDeSeguridad(synth({ emulated }))).toEqual([]);
+  });
+
+  it('el entorno trae solo las 3 variables (sin el índice por fecha) y referencia las tablas de DataStack', () => {
+    const { dt, data, vars, idDe } = conEntorno();
+    expect(Object.keys(vars).sort()).toEqual([
+      'POSTAL_CODES_TABLE',
+      'QUOTES_BY_STATUS_INDEX',
+      'QUOTES_TABLE',
+    ]);
+    expect(vars['QUOTES_BY_STATUS_INDEX']).toBe('byStatus');
+    expect(tablaDeImport(dt, vars['QUOTES_TABLE']!)).toBe(idDe(data.quotes));
+    expect(tablaDeImport(dt, vars['POSTAL_CODES_TABLE']!)).toBe(idDe(data.postalCodes));
+  });
+
+  it('IAM EXACTA: Query SOLO sobre el índice byStatus de Quotes y BatchGetItem SOLO sobre PostalCodes', () => {
+    const { dt, data, ss, idDe } = conEntorno();
+    expect(ss).toHaveLength(2);
+    const query = ss.find((s) => lista(s['Action']).includes('dynamodb:Query'))!;
+    expect(lista(query['Action'])).toEqual(['dynamodb:Query']);
+    expect(query['Condition']).toBeUndefined();
+    const recursos = lista(query['Resource']).map((r) => JSON.stringify(r));
+    expect(recursos).toHaveLength(1);
+    expect(recursos[0]).toContain('/index/byStatus');
+    expect(recursos.some((r) => r.includes('/index/byDate'))).toBe(false);
+    // Todos los recursos son índices: ninguno es la tabla base.
+    expect(recursos.every((r) => r.includes('/index/'))).toBe(true);
+
+    const batch = ss.find((s) => lista(s['Action']).includes('dynamodb:BatchGetItem'))!;
+    expect(lista(batch['Action'])).toEqual(['dynamodb:BatchGetItem']);
+    expect(batch['Condition']).toBeUndefined();
+    expect(tablasDeSentencia(dt, batch)).toEqual([idDe(data.postalCodes)]);
+  });
+
+  it('IAM: sin Scan, PutItem, UpdateItem, DeleteItem, GetItem, transacciones ni acceso a otros servicios', () => {
+    const { t } = conEntorno();
+    for (const s of sentenciasDe(t, 'AdminMetrics')) {
+      expect(s['Effect']).toBe('Allow');
+      expect(JSON.stringify(s['Resource'])).not.toBe('"*"');
+      for (const a of lista(s['Action']) as string[]) {
+        expect(a).not.toContain('*');
+        expect(a).not.toMatch(
+          /Scan|PutItem|UpdateItem|DeleteItem|BatchWriteItem|dynamodb:GetItem$|TransactWriteItems|TransactGetItems|^s3:|^ses:|^cloudfront:|^cognito/,
+        );
+        if (!a.startsWith('dynamodb:')) expect(a).toMatch(/^logs:|^xray:/);
+      }
+    }
+  });
+
+  it('no gana permisos sobre otras tablas (AuditLog, Settings, Counters, Stones...)', () => {
+    const { dt, data, ss, idDe } = conEntorno();
+    const tablas = ss
+      .filter((s) => !lista(s['Action']).includes('dynamodb:Query'))
+      .flatMap((s) => tablasDeSentencia(dt, s));
+    expect(tablas).toEqual([idDe(data.postalCodes)]);
+  });
+
+  it('throttling propio por ruta: 2 rps / ráfaga 5, y la etapa conserva 10/20', () => {
+    const stage = Object.values(synth().findResources('AWS::ApiGatewayV2::Stage'))[0]!;
+    expect(stage.Properties.DefaultRouteSettings).toEqual({
+      ThrottlingRateLimit: 10,
+      ThrottlingBurstLimit: 20,
+    });
+    for (const k of RUTAS) {
+      expect(stage.Properties.RouteSettings[k], k).toEqual({
+        ThrottlingRateLimit: 2,
+        ThrottlingBurstLimit: 5,
+      });
+    }
+  });
+
+  it('las otras Lambdas NO reciben las variables del resumen ni permisos de lectura de PostalCodes por él', () => {
+    const { stack } = build();
+    const t = Template.fromStack(stack);
+    for (const f of ['Health', 'AdminMe', 'AdminCatalog', 'AdminMedia', 'AdminSettings']) {
+      const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, f)]!;
+      const vars = Object.keys(fn.Properties.Environment?.Variables ?? {});
+      expect(vars, f).not.toContain('POSTAL_CODES_TABLE');
+      expect(vars, f).not.toContain('QUOTES_BY_STATUS_INDEX');
+    }
   });
 });

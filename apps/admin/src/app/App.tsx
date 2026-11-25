@@ -12,6 +12,7 @@ import { projectsConfig } from '../catalog/projects';
 import { servicesConfig } from '../catalog/services';
 import { stonesConfig } from '../catalog/stones';
 import { FreightScreen } from '../freight/FreightScreen';
+import { MetricsScreen } from '../metrics/MetricsScreen';
 import { QuoteRoutes } from '../quotes/QuoteRoutes';
 import { PublishScreen } from '../publish/PublishScreen';
 import { SettingsScreen } from '../settings/SettingsScreen';
@@ -32,7 +33,15 @@ export function AppRoutes() {
           </RequireAuth>
         }
       >
-        <Route index element={<Navigate to="/stones" replace />} />
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="dashboard"
+          element={
+            <RequireRole roles={['owner', 'staff']}>
+              <MetricsScreen />
+            </RequireRole>
+          }
+        />
         <Route
           path="stones/*"
           element={

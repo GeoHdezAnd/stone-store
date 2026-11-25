@@ -4,3 +4,4 @@ export * from './freight';
 export * from './media';
 export * from './quote-status';
 export * from './quote';
+export * from './metrics';

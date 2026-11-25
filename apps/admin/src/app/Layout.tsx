@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 const ACTIVE_ITEMS = [
+  { to: '/dashboard', label: 'Resumen' },
   { to: '/stones', label: 'Piedras' },
   { to: '/projects', label: 'Proyectos' },
   { to: '/finishes', label: 'Acabados' },
@@ -13,9 +14,6 @@ const ACTIVE_ITEMS = [
   { to: '/publish', label: 'Publicar' },
   { to: '/settings', label: 'Configuración' },
 ] as const;
-
-// Pantallas de fases posteriores (3 y 6): visibles pero desactivadas.
-const FUTURE_ITEMS = ['Resumen'] as const;
 
 function roleLabel(roles: readonly string[]): string {
   if (roles.includes('owner')) return 'Dueño';
@@ -101,14 +99,6 @@ export function Layout() {
                 <NavLink key={item.to} to={item.to} className="nav-btn">
                   {item.label}
                 </NavLink>
-              ))}
-              {FUTURE_ITEMS.map((label) => (
-                // Sin href: no es navegable ni entra en el orden de tabulación. Se conserva en el
-                // árbol de accesibilidad como enlace desactivado y con el aviso «Próximamente».
-                <a key={label} className="nav-btn" role="link" aria-disabled="true">
-                  <span>{label}</span>
-                  <small>Próximamente</small>
-                </a>
               ))}
             </nav>
 

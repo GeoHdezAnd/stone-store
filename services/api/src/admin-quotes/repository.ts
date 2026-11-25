@@ -1,30 +1,15 @@
-import { GetCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { quoteIndexKeys, type Quote, type QuoteStatus } from '@canteras/shared';
+import { GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { quoteIndexKeys, type Quote } from '@canteras/shared';
 import type { AuditEntry } from '../lib/audit';
+import {
+  queryQuotesIndex,
+  type ListPage,
+  type ListQuery,
+  type QuoteKey,
+  type StoredQuote,
+} from '../lib/quotes-query';
 
-/** Solicitud tal como se guarda: el dominio más las claves de índice y `searchKey`. */
-export type StoredQuote = Record<string, unknown>;
-
-/** Clave de continuación de Dynamo (`LastEvaluatedKey`) de uno de los dos índices. */
-export type QuoteKey = Record<string, string>;
-
-export interface ListQuery {
-  /** `status`: GSI `byStatus` (requiere `status`); `date`: GSI `byDate` (todas). */
-  index: 'status' | 'date';
-  status?: QuoteStatus;
-  /** Rango en la clave de orden `createdAt#quoteId` (ya armado por quien llama). */
-  from?: string;
-  to?: string;
-  /** Texto ya normalizado: `contains(searchKey, :q)`. */
-  q?: string;
-  limit: number;
-  exclusiveStartKey?: QuoteKey;
-}
-
-export interface ListPage {
-  items: StoredQuote[];
-  lastKey: QuoteKey | null;
-}
+export type { ListPage, ListQuery, QuoteKey, StoredQuote };
 
 export interface UpdateInput {
   /** Documento completo ya validado, con `rev` incrementado. */
@@ -94,51 +79,8 @@ export class DynamoQuoteRepository implements QuoteRepository {
     return out.Item ?? null;
   }
 
-  async list(query: ListQuery): Promise<ListPage> {
-    const byStatus = query.index === 'status';
-    // `#sk` se agrega solo si hay rango de fechas: DynamoDB rechaza nombres sin usar.
-    const names: Record<string, string> = {
-      '#pk': byStatus ? 'gsi1pk' : 'gsi2pk',
-    };
-    if (query.from !== undefined || query.to !== undefined) {
-      names['#sk'] = byStatus ? 'gsi1sk' : 'gsi2sk';
-    }
-    const values: Record<string, unknown> = {
-      ':pk': byStatus ? `STATUS#${query.status}` : 'QUOTE',
-    };
-    let key = '#pk = :pk';
-    if (query.from !== undefined && query.to !== undefined) {
-      key += ' AND #sk BETWEEN :from AND :to';
-      values[':from'] = query.from;
-      values[':to'] = query.to;
-    } else if (query.from !== undefined) {
-      key += ' AND #sk >= :from';
-      values[':from'] = query.from;
-    } else if (query.to !== undefined) {
-      key += ' AND #sk <= :to';
-      values[':to'] = query.to;
-    }
-    let filter: string | undefined;
-    if (query.q !== undefined) {
-      // El filtro se evalúa DESPUÉS del Limit: una página puede venir vacía con lastKey.
-      filter = 'contains(#sk2, :q)';
-      names['#sk2'] = 'searchKey';
-      values[':q'] = query.q;
-    }
-    const out = (await this.client.send(
-      new QueryCommand({
-        TableName: this.tables.quotes,
-        IndexName: byStatus ? this.tables.byStatusIndex : this.tables.byDateIndex,
-        KeyConditionExpression: key,
-        ...(filter === undefined ? {} : { FilterExpression: filter }),
-        ExpressionAttributeNames: names,
-        ExpressionAttributeValues: values,
-        ScanIndexForward: false,
-        Limit: query.limit,
-        ...(query.exclusiveStartKey ? { ExclusiveStartKey: query.exclusiveStartKey } : {}),
-      }),
-    )) as { Items?: StoredQuote[]; LastEvaluatedKey?: QuoteKey };
-    return { items: out.Items ?? [], lastKey: out.LastEvaluatedKey ?? null };
+  list(query: ListQuery): Promise<ListPage> {
+    return queryQuotesIndex(this.client, this.tables, query);
   }
 
   async update(input: UpdateInput): Promise<void> {

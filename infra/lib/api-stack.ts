@@ -19,7 +19,7 @@ import { type IBucket } from 'aws-cdk-lib/aws-s3';
 import { type IUserPool, type IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import { Runtime, type IFunction } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { type ILogGroup, LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { type Construct } from 'constructs';
 
 import { FLOCI_API_PORT, FLOCI_IP, type DeployEnv } from './config.js';
@@ -117,6 +117,12 @@ const SES_IDENTITY_ARN_RE = /^arn:aws:ses:[a-z0-9-]+:\d{12}:identity\/[A-Za-z0-9
 // Claves de ruta de la subida de fotos (las emite `addAdminResource('media', ...)`).
 const MEDIA_ROUTE_KEYS = ['ANY /admin/media', 'ANY /admin/media/{proxy+}'] as const;
 
+// Resumen del dashboard (`GET /admin/metrics`, privado con JWT): hace varias consultas a Quotes por
+// petición, así que lleva su propio límite (2 req/s, ráfaga 5) además del de la etapa. Las claves son
+// EXACTAMENTE las rutas que emite `addAdminResource('metrics')`.
+const METRICS_ROUTE_KEYS = ['ANY /admin/metrics', 'ANY /admin/metrics/{proxy+}'] as const;
+const METRICS_THROTTLE = { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 } as const;
+
 // Ruta PÚBLICA del formulario de cotización: límite propio (1 req/s, ráfaga 2) además del de la etapa.
 const QUOTES_CREATE_ROUTE_KEY = 'POST /quotes';
 
@@ -194,6 +200,19 @@ export class ApiStack extends Stack {
   public readonly adminQuotesFunction: IFunction;
   public readonly quotesCreateFunction: IFunction;
   public readonly freightEstimateFunction: IFunction;
+  /**
+   * Todas las Lambdas de la API por nombre lógico (`QuotesCreate`, `AdminMetrics`...). Las consume
+   * `ObservabilityStack` para crear sus alarmas sin que ApiStack conozca ese stack (sin ciclos).
+   */
+  public readonly observedFunctions: Record<string, IFunction> = {};
+  private readonly logGroups: Record<string, ILogGroup> = {};
+
+  /** Grupo de logs de `QuotesCreate`: sobre él se crean los filtros de métrica de observabilidad. */
+  public get quotesCreateLogGroup(): ILogGroup {
+    const group = this.logGroups['QuotesCreate'];
+    if (group === undefined) throw new Error('QuotesCreate aún no se ha creado.');
+    return group;
+  }
 
   public constructor(scope: Construct, id: string, props: ApiStackProps) {
     const {
@@ -291,6 +310,7 @@ export class ApiStack extends Stack {
         ]),
       ),
       [FREIGHT_ESTIMATE_ROUTE_KEY]: FREIGHT_ESTIMATE_THROTTLE,
+      ...Object.fromEntries(METRICS_ROUTE_KEYS.map((k) => [k, METRICS_THROTTLE])),
     };
 
     const makeFunction = (
@@ -303,7 +323,7 @@ export class ApiStack extends Stack {
         retention: RetentionDays.ONE_WEEK,
         removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
       });
-      return new NodejsFunction(this, `${name}Function`, {
+      const fn = new NodejsFunction(this, `${name}Function`, {
         entry: handlerPath(dir),
         handler: 'handler',
         runtime: Runtime.NODEJS_22_X,
@@ -320,6 +340,9 @@ export class ApiStack extends Stack {
           ...(externalModules === undefined ? {} : { externalModules }),
         },
       });
+      this.observedFunctions[name] = fn;
+      this.logGroups[name] = logGroup;
+      return fn;
     };
 
     this.healthFunction = makeFunction('Health', 'health');
@@ -651,6 +674,30 @@ export class ApiStack extends Stack {
       }),
     );
 
+    // Resumen del dashboard (`GET /admin/metrics`): SOLO LECTURA. IAM mínimo y explícito (sin `grant*`):
+    // - Quotes: `Query` únicamente sobre el ARN del índice `byStatus` (consulta por cada estado; no
+    //   usa `byDate`, ni la tabla base, ni GetItem, ni Scan, ni escrituras).
+    // - PostalCodes: `BatchGetItem` (código postal -> estado para la tabla de zonas).
+    // Sin AuditLog, Settings, Counters ni S3. Floci NO aplica IAM: verificar en AWS real.
+    const adminMetrics = makeFunction('AdminMetrics', 'admin-metrics');
+    adminMetrics.addEnvironment('QUOTES_TABLE', tables.quotes.tableName);
+    adminMetrics.addEnvironment('QUOTES_BY_STATUS_INDEX', QUOTES_BY_STATUS_INDEX);
+    adminMetrics.addEnvironment('POSTAL_CODES_TABLE', tables.postalCodes.tableName);
+    adminMetrics.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:Query'],
+        resources: [`${tables.quotes.tableArn}/index/${QUOTES_BY_STATUS_INDEX}`],
+      }),
+    );
+    adminMetrics.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:BatchGetItem'],
+        resources: [tables.postalCodes.tableArn],
+      }),
+    );
+
     // Formulario público de cotización (`POST /quotes`, CLAUDE.md 5.1 y 8): ruta SIN authorizer que
     // escribe en la base y manda correos. Mínimo privilegio con sentencias explícitas (sin `grant*`):
     // - Quotes: solo `PutItem` (crea la solicitud; no lee, consulta, actualiza ni borra).
@@ -905,6 +952,7 @@ export class ApiStack extends Stack {
     addAdminResource('freight-config', adminFreight);
     addAdminResource('freight', adminFreight);
     addAdminResource('quotes', adminQuotes);
+    addAdminResource('metrics', adminMetrics);
     for (const resource of ['stones', 'projects', 'finishes', 'services']) {
       addAdminResource(resource, adminCatalog);
     }
