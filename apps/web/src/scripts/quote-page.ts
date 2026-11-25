@@ -14,6 +14,7 @@ import {
   type QuoteListItem,
 } from './quote-list';
 import { parseQuantity } from './quantity';
+import { createFreightEstimator, type DraftSnapshot, type FreightEstimator } from './quote-freight';
 import { buildWhatsAppUrl } from './whatsapp';
 
 // Página /quote/: lista editable + formulario de cotización (CLAUDE.md 5.1, pasos 4 a 7).
@@ -82,6 +83,18 @@ function init(app: HTMLElement): void {
   // El botón viene deshabilitado en el HTML: sin JS no hay forma de enviar el formulario.
   submit.disabled = !canSubmit;
   if (!isPersistent()) q(app, '[data-persist-warning]').hidden = false;
+
+  // ---------- Estimado de flete ----------
+  // Sin API configurada no hay estimado: la sección sigue oculta y el formulario funciona igual.
+  const freightSection = q(app, '[data-freight-section]');
+  const estimator: FreightEstimator | undefined = apiConfigured
+    ? createFreightEstimator({
+        apiUrl: API_URL,
+        region: q(app, '[data-freight]'),
+        whatsapp,
+      })
+    : undefined;
+  if (estimator) freightSection.hidden = false;
 
   // ---------- Errores por campo ----------
   const errorEl = (id: string) => document.getElementById(id);
@@ -218,6 +231,7 @@ function init(app: HTMLElement): void {
     emptyMsg.hidden = items.length > 0;
     for (const item of items) itemsList.append(renderItem(item, stones.get(item.stoneId)!));
     refreshWhatsApp();
+    refreshFreight();
   }
 
   /** Piedras de la lista que siguen en el catálogo (nunca revienta con una piedra retirada). */
@@ -315,16 +329,19 @@ function init(app: HTMLElement): void {
       const n = parseQuantity(qty.value);
       updateItem(item.stoneId, { cantidad: Number.isFinite(n) && n > 0 ? n : undefined });
       refreshWhatsApp();
+      refreshFreight();
     });
     unit.addEventListener('change', () => {
       const u = unit.value as SoldByUnit;
       thickField.hidden = u !== 'm2';
       updateItem(item.stoneId, { unidad: u });
       refreshWhatsApp();
+      refreshFreight();
     });
     thickness.addEventListener('change', () => {
       const cm = Number(thickness.value);
       updateItem(item.stoneId, { espesorCm: thickness.value === '' ? undefined : cm });
+      refreshFreight();
     });
 
     li.append(head, fields);
@@ -346,6 +363,32 @@ function init(app: HTMLElement): void {
       items: currentItemsForMessage(),
       codigoPostal: q<HTMLInputElement>(form, '#f-cp').value.trim(),
     });
+  }
+
+  // ---------- Estimado de flete: lo que hay en el formulario ahora ----------
+  function readSnapshot(): DraftSnapshot {
+    const items = liveItems().map((i) => {
+      const qty = document.getElementById(`item-${i.stoneId}-cantidad`) as HTMLInputElement | null;
+      const unit = document.getElementById(`item-${i.stoneId}-unidad`) as HTMLSelectElement | null;
+      const thick = document.getElementById(
+        `item-${i.stoneId}-espesor`,
+      ) as HTMLSelectElement | null;
+      const n = qty ? parseQuantity(qty.value) : Number.NaN;
+      const cm = thick && thick.value !== '' ? Number(thick.value) : undefined;
+      return {
+        stoneId: i.stoneId,
+        nombre: stones.get(i.stoneId)?.nombre ?? i.nombre,
+        acabado: i.acabado,
+        cantidad: Number.isFinite(n) && n > 0 ? n : undefined,
+        unidad: (unit?.value ?? 'm2') as SoldByUnit,
+        espesorCm: cm,
+      };
+    });
+    return { codigoPostal: q<HTMLInputElement>(form, '#f-cp').value.trim(), items };
+  }
+
+  function refreshFreight(): void {
+    estimator?.update(readSnapshot());
   }
 
   // ---------- Cuerpo del pedido desde el DOM ----------
@@ -447,7 +490,10 @@ function init(app: HTMLElement): void {
 
   form.addEventListener('input', (e) => {
     const t = e.target as HTMLElement;
-    if (t.id === 'f-cp') refreshWhatsApp();
+    if (t.id === 'f-cp') {
+      refreshWhatsApp();
+      refreshFreight();
+    }
     // Al corregir un campo se limpia su error.
     if (t.getAttribute('aria-invalid') === 'true') {
       const err = t.getAttribute('aria-describedby');
@@ -568,6 +614,7 @@ function init(app: HTMLElement): void {
     const cp = q<HTMLInputElement>(form, '#f-cp').value.trim();
     clearItems();
     form.reset();
+    estimator?.update({ codigoPostal: '', items: [] });
     formView.hidden = true;
     doneView.hidden = false;
     if (folio) {
