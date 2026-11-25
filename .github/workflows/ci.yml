@@ -50,6 +50,7 @@ jobs:
         run: npm test
 
       # Sin AWS_ENDPOINT_URL ni credenciales: solo verifica que los stacks sinteticen.
+      # `skipSharpCheck`: el CI no empaqueta el binario de sharp (necesita red); NUNCA se despliega así.
       - name: Sintetizar la infraestructura
         working-directory: infra
-        run: npx cdk synth --quiet
+        run: npx cdk synth --quiet -c skipSharpCheck=true
