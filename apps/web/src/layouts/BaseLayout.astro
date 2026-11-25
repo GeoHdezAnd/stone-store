@@ -5,7 +5,7 @@ import '../styles/site.css';
 import '../styles/pages.css';
 import SiteHeader from '../components/SiteHeader.astro';
 import { loadCatalog } from '../lib/catalog-loader';
-import { mediaUrl } from '../lib/media';
+import { mediaVariantUrl, SHARE_WIDTH } from '../lib/media';
 
 interface Props {
   title: string;
@@ -28,7 +28,10 @@ const { settings } = catalog;
 // URLs absolutas solo si hay `site` (variable PUBLIC_SITE_URL, ver astro.config.ts).
 const fullTitle = `${title} | Canteras Naturales`;
 const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : undefined;
-const imageUrl = ogImage ? new URL(mediaUrl(ogImage), Astro.site ?? Astro.url).href : undefined;
+// La vista previa usa la variante sin metadatos, nunca el original (puede traer EXIF/GPS).
+const imageUrl = ogImage
+  ? new URL(mediaVariantUrl(ogImage, SHARE_WIDTH), Astro.site ?? Astro.url).href
+  : undefined;
 ---
 
 <!doctype html>

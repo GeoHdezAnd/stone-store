@@ -1,5 +1,5 @@
 ---
-import { mediaSrcSet, mediaUrl } from '../lib/media';
+import { FALLBACK_WIDTH, mediaSrcSet, mediaVariantUrl } from '../lib/media';
 
 interface Props {
   /** Clave de S3 (`stones/<id>/<archivo>.jpg`); sin clave se muestra el placeholder. */
@@ -24,7 +24,7 @@ const {
 <div class="photo grayscale" style={`aspect-ratio: ${ratio}`}>
   {photoKey ? (
     <img
-      src={mediaUrl(photoKey)}
+      src={mediaVariantUrl(photoKey, FALLBACK_WIDTH)}
       srcset={mediaSrcSet(photoKey)}
       sizes={sizes}
       alt={alt}

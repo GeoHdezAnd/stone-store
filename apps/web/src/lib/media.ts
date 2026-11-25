@@ -3,15 +3,31 @@
 
 const base = (import.meta.env.PUBLIC_MEDIA_BASE_URL ?? '/media').replace(/\/+$/, '');
 
-// PROPUESTA: la optimización de imágenes es de la fase 6 y aún no define el nombre de las
-// variantes. Se asume `<clave sin extensión>-<ancho>w.webp` (480, 960 y 1600 px, CLAUDE.md 6.3).
+// Las variantes las genera la Lambda `MediaVariants` (fase 6.3) con el nombre
+// `<clave sin extensión>-<ancho>w.webp` (480, 960 y 1600 px). El contrato vive en
+// `packages/shared/src/media/variants.ts`.
 export const MEDIA_WIDTHS = [480, 960, 1600] as const;
+export type MediaWidth = (typeof MEDIA_WIDTHS)[number];
 
+/** Ancho de la variante que sirve de `src` (respaldo para navegadores sin `srcset`). */
+export const FALLBACK_WIDTH: MediaWidth = 960;
+/** Ancho de la variante para la vista previa al compartir (Open Graph). */
+export const SHARE_WIDTH: MediaWidth = 1600;
+
+/** URL de una clave tal cual. No uses esta función con fotos: el original conserva EXIF/GPS. */
 export function mediaUrl(key: string): string {
   return `${base}/${key}`;
 }
 
-export function mediaSrcSet(key: string): string {
+/**
+ * URL de una variante WebP. Las fotos siempre se sirven por aquí: las variantes salen sin
+ * metadatos (EXIF/GPS), mientras que el original puede traer la ubicación de la obra.
+ */
+export function mediaVariantUrl(key: string, width: MediaWidth): string {
   const stem = key.replace(/\.[^./]+$/, '');
-  return MEDIA_WIDTHS.map((w) => `${mediaUrl(`${stem}-${w}w.webp`)} ${w}w`).join(', ');
+  return mediaUrl(`${stem}-${width}w.webp`);
+}
+
+export function mediaSrcSet(key: string): string {
+  return MEDIA_WIDTHS.map((w) => `${mediaVariantUrl(key, w)} ${w}w`).join(', ');
 }
