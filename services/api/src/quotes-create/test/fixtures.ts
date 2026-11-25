@@ -59,6 +59,17 @@ export function seedRepo(repo: MemoryQuotesCreateRepository): void {
     stoneRow({ id: 'travertino', nombre: 'Travertino', activa: false }),
   );
   repo.publicSettings = structuredClone(PUBLIC_ROW);
+  // CP de ejemplo: 72810 dentro de las zonas cubiertas y 90000 fuera.
+  const cp = (code: string, lat: number, lng: number) => ({
+    cp: code,
+    estado: 'Puebla',
+    municipio: 'Municipio (ejemplo)',
+    colonia: 'Colonia (ejemplo)',
+    lat,
+    lng,
+  });
+  repo.postalCodes.set('72810', cp('72810', 19.05, -98.3));
+  repo.postalCodes.set('90000', cp('90000', 19.318, -98.238));
 }
 
 export interface EventOptions {

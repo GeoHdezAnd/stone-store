@@ -13,7 +13,9 @@ export interface CaptchaVerifier {
 
 export const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const MAX_TOKEN_LENGTH = 2048;
-const DEFAULT_TIMEOUT_MS = 3000;
+/** Plazo del captcha (incluye la lectura del secreto en SSM); cuenta en `budget.ts`. */
+export const CAPTCHA_TIMEOUT_MS = 3000;
+const DEFAULT_TIMEOUT_MS = CAPTCHA_TIMEOUT_MS;
 
 /** Token literal que acepta el verificador de emulador. */
 export const FAKE_CAPTCHA_TOKEN = 'test-pass';

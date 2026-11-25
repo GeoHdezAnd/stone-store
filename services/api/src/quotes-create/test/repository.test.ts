@@ -12,6 +12,8 @@ const TABLES = {
   stones: 'Stones',
   freightConfig: 'FreightConfig',
   settings: 'Settings',
+  postalCodes: 'PostalCodes',
+  routeCache: 'RouteCache',
 };
 
 type Handler = (cmd: { constructor: { name: string }; input: Record<string, unknown> }) => unknown;
@@ -301,5 +303,41 @@ describe('putQuote', () => {
     await expect(repo.putQuote({ quoteId: 'Q1' })).rejects.toMatchObject({
       name: 'InternalServerError',
     });
+  });
+});
+
+describe('getPostalCode', () => {
+  it('lee PostalCodes por cp (sin lectura consistente: el catálogo de CP casi no cambia)', async () => {
+    const row = { cp: '72810', lat: 19.05, lng: -98.3 };
+    const { repo, commands } = setup(() => ({ Item: row }));
+    expect(await repo.getPostalCode('72810')).toEqual(row);
+    expect(commands).toEqual([
+      { name: 'GetCommand', input: { TableName: 'PostalCodes', Key: { cp: '72810' } } },
+    ]);
+  });
+
+  it('CP inexistente: null', async () => {
+    const { repo } = setup(() => ({}));
+    expect(await repo.getPostalCode('99999')).toBeNull();
+  });
+});
+
+describe('RouteCache', () => {
+  it('getRouteCache lee por cp, sin lectura consistente', async () => {
+    const row = { cp: '72810', distanciaKm: 62 };
+    const { repo, commands } = setup(() => ({ Item: row }));
+    expect(await repo.getRouteCache('72810')).toEqual(row);
+    expect(commands).toEqual([
+      { name: 'GetCommand', input: { TableName: 'RouteCache', Key: { cp: '72810' } } },
+    ]);
+  });
+
+  it('putRouteCache escribe un PutItem simple en RouteCache (sobrescribe: es una caché)', async () => {
+    const { repo, commands } = setup(() => ({}));
+    const item = { cp: '72810', distanciaKm: 62, ttl: 1 };
+    await repo.putRouteCache(item);
+    expect(commands).toEqual([
+      { name: 'PutCommand', input: { TableName: 'RouteCache', Item: item } },
+    ]);
   });
 });

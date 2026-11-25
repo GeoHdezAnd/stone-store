@@ -1,6 +1,7 @@
 import type { Stone } from '../catalog/stone';
 import { FREIGHT_ERROR_CODES, FreightError, type FreightErrorCode } from '../freight/errors';
 import type { FreightConfig } from '../freight/config';
+import type { FreightEstimate } from '../freight/estimate';
 import { computeWeightKg, type FreightItem } from '../freight/weight';
 import type { CreateQuoteRequest } from './create-request';
 import { quoteSchema, type Quote } from './schema';
@@ -39,6 +40,11 @@ export interface NewQuoteInput {
   quoteId: string;
   folio: string;
   source: NewQuoteSource;
+  /**
+   * Estimado de flete RECALCULADO por el servidor (nunca el del navegador). Opcional: si el cálculo
+   * falla la solicitud se guarda igual sin `freight` y el dueño la atiende a mano.
+   */
+  freightEstimate?: FreightEstimate | undefined;
 }
 
 export type NewQuoteRecord = {
@@ -89,6 +95,24 @@ function weightOrThrow(
   }
 }
 
+/**
+ * Foto del estimado para `Quotes.freight`: solo los campos de CLAUDE.md 6.2 (sin `aviso` ni `ejemplo`).
+ * Límite conocido: no conserva la marca `ejemplo` de la tarifa; el dashboard se apoya en `versionTarifa`.
+ */
+function freightSnapshot(estimate: FreightEstimate, calculadoAt: string): Quote['freight'] {
+  return {
+    estimadoMin: estimate.estimadoMin,
+    estimadoMax: estimate.estimadoMax,
+    moneda: estimate.moneda,
+    pesoTotalKg: estimate.pesoTotalKg,
+    distanciaKm: estimate.distanciaKm,
+    camion: estimate.camion,
+    viajes: estimate.viajes,
+    versionTarifa: estimate.versionTarifa,
+    calculadoAt,
+  };
+}
+
 export function buildNewQuote(input: NewQuoteInput): NewQuoteRecord {
   const { request, stones, freight, now, quoteId, folio } = input;
   const byId = new Map(stones.map((s) => [s.id, s]));
@@ -134,6 +158,10 @@ export function buildNewQuote(input: NewQuoteInput): NewQuoteRecord {
 
   const createdAt = now.toISOString();
   const source = buildSource(input.source);
+  const freightEstimate =
+    input.freightEstimate === undefined
+      ? undefined
+      : freightSnapshot(input.freightEstimate, createdAt);
   // El esquema final es la última barrera: un quoteId o folio mal formados no se guardan.
   const quote = quoteSchema.parse({
     quoteId,
@@ -147,6 +175,7 @@ export function buildNewQuote(input: NewQuoteInput): NewQuoteRecord {
     notes: [],
     consentAt: createdAt,
     ...(source === undefined ? {} : { source }),
+    ...(freightEstimate === undefined ? {} : { freight: freightEstimate }),
     rev: 1,
   });
   return { quote, item: { ...quote, ...quoteIndexKeys(quote) } };

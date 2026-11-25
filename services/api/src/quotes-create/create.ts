@@ -6,7 +6,10 @@ import {
   emailRateKey,
   folioYear,
   formatFolio,
+  FreightError,
   freightConfigSchema,
+  type FreightEstimate,
+  type FreightItem,
   generateUlid,
   ipRateKey,
   MAX_FOLIO_NUMBER,
@@ -24,8 +27,10 @@ import {
 } from '@canteras/shared';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { HttpError, jsonResponse } from '../lib/http';
+import { computeFreightEstimate } from '../lib/freight-quote';
 import { createLogger, type Logger, type LogSink } from '../lib/logger';
 import type { Mailer, MailMessage } from '../lib/mailer';
+import type { RouteProvider } from '../lib/route-provider';
 import { validationErrorResponse } from '../lib/validation';
 import { sha256Hex } from './hash';
 import type { CaptchaVerifier } from './captcha';
@@ -43,6 +48,12 @@ import { FolioExhaustedError, type QuotesCreateRepository } from './repository';
  * honeypot no sirve de oráculo. El límite y el folio se gastan solo cuando todo lo demás es válido.
  */
 
+/**
+ * Plazo del estimado de flete: el cliente del SDK de Location espera hasta 8 s en el peor caso y la
+ * Lambda tiene 10 s; ver el presupuesto completo (captcha, ruta, SES) en `budget.ts`.
+ */
+export const FREIGHT_TIMEOUT_MS = 2000;
+
 /** Tope del cuerpo: un formulario normal pesa menos de 4 KB. */
 export const MAX_BODY_BYTES = 16 * 1024;
 
@@ -54,6 +65,13 @@ export interface QuotesCreateDeps {
   mailer: Mailer | null;
   /** Origen del dashboard para el enlace del aviso; sin él, el aviso va sin enlace. */
   adminBaseUrl?: string | undefined;
+  /**
+   * Proveedor de distancias para el estimado de flete. Sin él (`undefined`) la solicitud se guarda
+   * sin `freight`. El estimado es best-effort: nunca hace fallar la solicitud.
+   */
+  routes?: RouteProvider | undefined;
+  /** Plazo máximo del estimado (ms); pasado, se guarda sin `freight` (la Lambda tiene 10 s). */
+  freightTimeoutMs?: number | undefined;
   now?: () => Date;
   newQuoteId?: (now: Date) => string;
   /** Azar del folio señuelo del honeypot (no es criptográfico). */
@@ -129,6 +147,55 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
       });
     } catch (err) {
       log.warn('mail_failed', { ...ref, errName: errorName(err) });
+    }
+  }
+
+  /**
+   * Estimado de flete RECALCULADO aquí (jamás el del navegador), con la misma tarifa activa, la misma
+   * tabla de CP y la misma caché de rutas que `POST /freight/estimate`. Best-effort: ante CUALQUIER
+   * fallo (CP ausente o fuera de zona, proveedor caído o lento, base) devuelve `undefined` y la
+   * solicitud se guarda sin `freight` para que el dueño la atienda a mano. Solo se registra el tipo
+   * de fallo y los 2 primeros dígitos del CP (nunca datos del cliente).
+   */
+  async function estimateFreightSafely(
+    request: { works: { codigoPostal: string }; items: readonly FreightItem[] },
+    freightConfig: Parameters<typeof computeFreightEstimate>[1]['config'],
+    stones: Stone[],
+    at: Date,
+    log: Logger,
+  ): Promise<FreightEstimate | undefined> {
+    if (deps.routes === undefined) return undefined;
+    const cpPrefix = request.works.codigoPostal.slice(0, 2);
+    const timeoutMs = deps.freightTimeoutMs ?? FREIGHT_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const estimate = computeFreightEstimate(
+        { store: repo, routes: deps.routes },
+        {
+          codigoPostal: request.works.codigoPostal,
+          items: request.items,
+          stones,
+          config: freightConfig,
+          at,
+          log,
+        },
+      );
+      const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('freight_timeout')), timeoutMs);
+      });
+      // Si gana el plazo, la promesa del estimado sigue viva: se silencia su rechazo tardío.
+      estimate.catch(() => undefined);
+      return await Promise.race([estimate, deadline]);
+    } catch (err) {
+      if (err instanceof FreightError) {
+        // Fuera de zona o pedido demasiado grande: esperado, el dueño cotiza el flete a mano.
+        log.info('freight_estimate_skipped', { cpPrefix, code: err.code });
+      } else {
+        log.warn('freight_estimate_failed', { cpPrefix, errName: errorName(err) });
+      }
+      return undefined;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 
@@ -237,7 +304,7 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
 
     const quoteId = newQuoteId(startedAt);
     const source = { userAgent: header(event, 'user-agent'), referrer: header(event, 'referer') };
-    const build = (folio: string) =>
+    const build = (folio: string, freightEstimate?: FreightEstimate) =>
       buildNewQuote({
         request,
         stones,
@@ -246,6 +313,7 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
         quoteId,
         folio,
         source,
+        freightEstimate,
       });
 
     // Primero se valida el pedido con un folio provisional: un 422 no debe gastar un número real.
@@ -293,6 +361,25 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
       }
     }
 
+    // Estimado de flete (best-effort) DESPUÉS de validar todo y de pasar el límite: un abuso o un
+    // pedido inválido nunca llega a pagar una ruta. Antes de reservar el folio: si el proveedor
+    // tarda, no queda un folio gastado sin guardar.
+    const freightEstimate = await estimateFreightSafely(
+      {
+        works: request.works,
+        items: request.items.map((i) => ({
+          stoneId: i.stoneId,
+          cantidad: i.cantidad,
+          unidad: i.unidad,
+          ...(i.espesorCm === undefined ? {} : { espesorCm: i.espesorCm }),
+        })),
+      },
+      freight.data,
+      stones,
+      startedAt,
+      log,
+    );
+
     let number: number;
     try {
       number = await repo.reserveFolioNumber(year);
@@ -308,7 +395,18 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
       throw new HttpError(503, 'quotes_unavailable');
     }
 
-    const { quote, item } = build(formatFolio(year, number));
+    const finalFolio = formatFolio(year, number);
+    let built: ReturnType<typeof build>;
+    try {
+      built = build(finalFolio, freightEstimate);
+    } catch (err) {
+      // Un estimado que no cabe en el esquema (valor absurdo) no puede tumbar la solicitud ya
+      // aceptada: se guarda sin `freight`. Si falla también sin él, el error es otro y sube.
+      if (freightEstimate === undefined) throw err;
+      log.warn('freight_snapshot_invalid', { errName: errorName(err) });
+      built = build(finalFolio);
+    }
+    const { quote, item } = built;
     // Duplicado (`DuplicateQuoteError`) u otro fallo: sube como error inesperado (500 sin detalles).
     await repo.putQuote(item);
     log.info('quote_created', { quoteId: quote.quoteId, folio: quote.folio });

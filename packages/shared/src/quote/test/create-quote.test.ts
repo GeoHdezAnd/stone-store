@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { makeStone, stones } from '../../freight/test/test-fixtures';
 import { computeWeightKg } from '../../freight/weight';
 import { createQuoteRequestSchema, type CreateQuoteRequest } from '../create-request';
+import type { FreightEstimate } from '../../freight/estimate';
 import { buildNewQuote, NewQuoteError, type NewQuoteInput } from '../create-quote';
 import { quoteSchema, stripStorageKeys } from '../schema';
 import { quoteIndexKeys } from '../search';
@@ -60,7 +61,7 @@ describe('buildNewQuote: documento', () => {
     expect(quote.ejemplo).toBeUndefined();
   });
 
-  it('NO trae `freight` (aún no hay distancia), ni finalQuote, ni respondedAt, ni sendLock', () => {
+  it('sin estimado NO trae `freight`, ni finalQuote, ni respondedAt, ni sendLock', () => {
     const { quote } = buildNewQuote(input());
     for (const k of ['freight', 'finalQuote', 'respondedAt', 'sendLock', 'lostReason'] as const) {
       expect(k in quote, k).toBe(false);
@@ -258,5 +259,64 @@ describe('buildNewQuote: entradas inválidas del servidor', () => {
   it('un quoteId o folio mal formados no pasan el esquema final (falla en vez de guardar basura)', () => {
     expect(() => buildNewQuote(input({ quoteId: 'no-ulid' }))).toThrow();
     expect(() => buildNewQuote(input({ folio: 'CN-1-1' }))).toThrow();
+  });
+});
+
+describe('buildNewQuote: estimado de flete calculado por el servidor', () => {
+  const estimate: FreightEstimate = {
+    estimadoMin: 7200,
+    estimadoMax: 8800,
+    moneda: 'MXN',
+    pesoTotalKg: 23100,
+    distanciaKm: 62,
+    camion: 'Tráiler',
+    viajes: 1,
+    versionTarifa: 't0002',
+    ejemplo: true,
+    aviso: 'Estimado sujeto a confirmación.',
+  };
+
+  it('guarda `freight` con los 9 campos de CLAUDE.md 6.2 y calculadoAt = ahora', () => {
+    const { quote, item } = buildNewQuote(input({ freightEstimate: estimate }));
+    const esperado = {
+      estimadoMin: 7200,
+      estimadoMax: 8800,
+      moneda: 'MXN',
+      pesoTotalKg: 23100,
+      distanciaKm: 62,
+      camion: 'Tráiler',
+      viajes: 1,
+      versionTarifa: 't0002',
+      calculadoAt: '2026-11-20T15:30:00.000Z',
+    };
+    expect(quote.freight).toEqual(esperado);
+    expect(item.freight).toEqual(esperado);
+  });
+
+  it('no copia `aviso` ni `ejemplo` al documento (el esquema es estricto)', () => {
+    const { quote } = buildNewQuote(input({ freightEstimate: estimate }));
+    expect(Object.keys(quote.freight ?? {}).sort()).toEqual(
+      [
+        'calculadoAt',
+        'camion',
+        'distanciaKm',
+        'estimadoMax',
+        'estimadoMin',
+        'moneda',
+        'pesoTotalKg',
+        'versionTarifa',
+        'viajes',
+      ].sort(),
+    );
+  });
+
+  it('el documento con `freight` sigue pasando quoteSchema', () => {
+    const { item } = buildNewQuote(input({ freightEstimate: estimate }));
+    const r = quoteSchema.safeParse(stripStorageKeys(item));
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+  });
+
+  it('un estimado inconsistente (viajes 0) no se guarda: lanza en vez de omitir en silencio', () => {
+    expect(() => buildNewQuote(input({ freightEstimate: { ...estimate, viajes: 0 } }))).toThrow();
   });
 });

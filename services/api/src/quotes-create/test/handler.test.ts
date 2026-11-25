@@ -7,6 +7,8 @@ const VARS = [
   'STONES_TABLE',
   'FREIGHT_CONFIG_TABLE',
   'SETTINGS_TABLE',
+  'POSTAL_CODES_TABLE',
+  'ROUTE_CACHE_TABLE',
 ];
 
 afterEach(() => {
@@ -43,5 +45,27 @@ describe('handler de quotes-create', () => {
     for (const v of VARS) vi.stubEnv(v, 'x');
     vi.stubEnv('TURNSTILE_MODE', 'off');
     await expect(import('../handler')).rejects.toThrow(/TURNSTILE_MODE/);
+  });
+
+  it('ROUTE_PROVIDER inválido impide arrancar (nunca cae a un proveedor por defecto)', async () => {
+    for (const v of VARS) vi.stubEnv(v, 'x');
+    vi.stubEnv('ROUTE_PROVIDER', 'otro');
+    await expect(import('../handler')).rejects.toThrow(/ROUTE_PROVIDER/);
+  });
+
+  it('sin ROUTE_PROVIDER arranca: la solicitud sigue funcionando, solo sin estimado de flete', async () => {
+    for (const v of VARS) vi.stubEnv(v, 'x');
+    vi.stubEnv('AWS_REGION', 'us-east-1');
+    vi.stubEnv('ROUTE_PROVIDER', '');
+    const mod = await import('../handler');
+    expect(typeof mod.handler).toBe('function');
+  });
+
+  it('con ROUTE_PROVIDER=haversine arranca sin crear el cliente de Location', async () => {
+    for (const v of VARS) vi.stubEnv(v, 'x');
+    vi.stubEnv('AWS_REGION', 'us-east-1');
+    vi.stubEnv('ROUTE_PROVIDER', 'haversine');
+    const mod = await import('../handler');
+    expect(typeof mod.handler).toBe('function');
   });
 });

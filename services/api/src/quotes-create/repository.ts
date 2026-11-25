@@ -39,6 +39,12 @@ export interface QuotesCreateRepository {
   consumeRateLimit(key: string, max: number, expiresAtSeconds: number): Promise<boolean>;
   /** Número de folio ya concedido en el año (0 si no hay contador). Solo lectura: no reserva nada. */
   peekFolioNumber(year: number): Promise<number>;
+  /** Fila de `PostalCodes` por CP, o `null` (para el estimado de flete). */
+  getPostalCode(cp: string): Promise<Record<string, unknown> | null>;
+  /** Fila de `RouteCache` por CP, o `null`. */
+  getRouteCache(cp: string): Promise<Record<string, unknown> | null>;
+  /** Guarda (o sobrescribe) la distancia calculada de un CP. */
+  putRouteCache(item: Record<string, unknown>): Promise<void>;
   /** Crea la solicitud solo si el `quoteId` no existe. Lanza `DuplicateQuoteError` si ya existe. */
   putQuote(item: Record<string, unknown>): Promise<void>;
 }
@@ -54,6 +60,8 @@ export interface QuotesCreateTables {
   stones: string;
   freightConfig: string;
   settings: string;
+  postalCodes: string;
+  routeCache: string;
 }
 
 export interface DynamoQuotesCreateOptions {
@@ -83,9 +91,14 @@ export class DynamoQuotesCreateRepository implements QuotesCreateRepository {
   private async getItem(
     table: string,
     key: Record<string, string>,
+    consistent = true,
   ): Promise<Record<string, unknown> | null> {
     const out = (await this.client.send(
-      new GetCommand({ TableName: table, Key: key, ConsistentRead: true }),
+      new GetCommand({
+        TableName: table,
+        Key: key,
+        ...(consistent ? { ConsistentRead: true } : {}),
+      }),
     )) as { Item?: Record<string, unknown> };
     return out.Item ?? null;
   }
@@ -180,6 +193,18 @@ export class DynamoQuotesCreateRepository implements QuotesCreateRepository {
     const item = await this.getItem(this.tables.counters, { name: folioCounterName(year) });
     const value = item?.['value'];
     return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0;
+  }
+
+  getPostalCode(cp: string): Promise<Record<string, unknown> | null> {
+    return this.getItem(this.tables.postalCodes, { cp }, false);
+  }
+
+  getRouteCache(cp: string): Promise<Record<string, unknown> | null> {
+    return this.getItem(this.tables.routeCache, { cp }, false);
+  }
+
+  async putRouteCache(item: Record<string, unknown>): Promise<void> {
+    await this.client.send(new PutCommand({ TableName: this.tables.routeCache, Item: item }));
   }
 
   async putQuote(item: Record<string, unknown>): Promise<void> {

@@ -12,6 +12,9 @@ export type MemoryMethod =
   | 'getActiveFreightRow'
   | 'getStones'
   | 'getPublicSettings'
+  | 'getPostalCode'
+  | 'getRouteCache'
+  | 'putRouteCache'
   | 'reserveFolioNumber'
   | 'consumeRateLimit'
   | 'peekFolioNumber'
@@ -24,6 +27,8 @@ export class MemoryQuotesCreateRepository implements QuotesCreateRepository {
   /** Contadores de límite: clave -> `{ value, ttl }` (como la fila de DynamoDB). */
   readonly rateLimits = new Map<string, { value: number; ttl: number }>();
   readonly stones = new Map<string, Record<string, unknown>>();
+  readonly postalCodes = new Map<string, Record<string, unknown>>();
+  readonly routeCache = new Map<string, Record<string, unknown>>();
   activeFreight: Record<string, unknown> | null = null;
   publicSettings: Record<string, unknown> | null = null;
   /** Si hay un error para el método, se lanza (después de registrar la llamada). */
@@ -50,6 +55,23 @@ export class MemoryQuotesCreateRepository implements QuotesCreateRepository {
   async getPublicSettings(): Promise<Record<string, unknown> | null> {
     this.enter('getPublicSettings');
     return this.publicSettings ? structuredClone(this.publicSettings) : null;
+  }
+
+  async getPostalCode(cp: string): Promise<Record<string, unknown> | null> {
+    this.enter('getPostalCode');
+    const row = this.postalCodes.get(cp);
+    return row ? structuredClone(row) : null;
+  }
+
+  async getRouteCache(cp: string): Promise<Record<string, unknown> | null> {
+    this.enter('getRouteCache');
+    const row = this.routeCache.get(cp);
+    return row ? structuredClone(row) : null;
+  }
+
+  async putRouteCache(item: Record<string, unknown>): Promise<void> {
+    this.enter('putRouteCache');
+    this.routeCache.set(String(item['cp']), structuredClone(item));
   }
 
   async reserveFolioNumber(year: number): Promise<number> {

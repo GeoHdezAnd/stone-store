@@ -7,16 +7,20 @@ const BASE = {
   STONES_TABLE: 'Stones',
   FREIGHT_CONFIG_TABLE: 'FreightConfig',
   SETTINGS_TABLE: 'Settings',
+  POSTAL_CODES_TABLE: 'PostalCodes',
+  ROUTE_CACHE_TABLE: 'RouteCache',
 };
 
 describe('loadConfig de quotes-create', () => {
-  it('lee las 5 tablas obligatorias y deja lo opcional sin definir', () => {
+  it('lee las 7 tablas obligatorias y deja lo opcional sin definir', () => {
     expect(loadConfig(BASE)).toEqual({
       quotes: 'Quotes',
       counters: 'Counters',
       stones: 'Stones',
       freightConfig: 'FreightConfig',
       settings: 'Settings',
+      postalCodes: 'PostalCodes',
+      routeCache: 'RouteCache',
     });
   });
 

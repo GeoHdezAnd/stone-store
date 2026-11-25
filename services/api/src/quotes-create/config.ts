@@ -4,6 +4,10 @@ export interface QuotesCreateConfig {
   stones: string;
   freightConfig: string;
   settings: string;
+  /** Coordenadas de cada CP (destino del estimado de flete). */
+  postalCodes: string;
+  /** Caché de distancias por CP (misma tabla que usa `freight-estimate`). */
+  routeCache: string;
   /** Origen del dashboard para el enlace del aviso al dueño. Sin él, el aviso va sin enlace. */
   adminBaseUrl?: string;
   /** Solo `fake` (emulador): acepta el token literal `test-pass`. Infra lo pone ÚNICAMENTE con emulador. */
@@ -61,6 +65,8 @@ export function loadConfig(env: Record<string, string | undefined>): QuotesCreat
     stones: required(env, 'STONES_TABLE'),
     freightConfig: required(env, 'FREIGHT_CONFIG_TABLE'),
     settings: required(env, 'SETTINGS_TABLE'),
+    postalCodes: required(env, 'POSTAL_CODES_TABLE'),
+    routeCache: required(env, 'ROUTE_CACHE_TABLE'),
   };
 
   const adminBaseUrl = optional(env, 'ADMIN_BASE_URL');
