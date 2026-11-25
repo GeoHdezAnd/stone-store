@@ -1,0 +1,94 @@
+{
+  "ejemplo": true,
+  "aviso": "Datos de EJEMPLO, no reales y no provienen de SEPOMEX. Las coordenadas son aproximadas y solo sirven para probar el estimado de flete.",
+  "items": [
+    {
+      "cp": "72000",
+      "estado": "Puebla",
+      "municipio": "Puebla (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 19.043,
+      "lng": -98.198
+    },
+    {
+      "cp": "72810",
+      "estado": "Puebla",
+      "municipio": "San Andrés Cholula (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 19.05,
+      "lng": -98.3
+    },
+    {
+      "cp": "74000",
+      "estado": "Puebla",
+      "municipio": "Huejotzingo (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 19.16,
+      "lng": -98.4
+    },
+    {
+      "cp": "74200",
+      "estado": "Puebla",
+      "municipio": "Atlixco (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 18.91,
+      "lng": -98.43
+    },
+    {
+      "cp": "75700",
+      "estado": "Puebla",
+      "municipio": "Tehuacán (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 18.46,
+      "lng": -97.39
+    },
+    {
+      "cp": "90000",
+      "estado": "Tlaxcala",
+      "municipio": "Tlaxcala (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 19.318,
+      "lng": -98.238
+    },
+    {
+      "cp": "90300",
+      "estado": "Tlaxcala",
+      "municipio": "Apizaco (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 19.41,
+      "lng": -98.14
+    },
+    {
+      "cp": "91000",
+      "estado": "Veracruz",
+      "municipio": "Xalapa (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 19.53,
+      "lng": -96.91
+    },
+    {
+      "cp": "94300",
+      "estado": "Veracruz",
+      "municipio": "Orizaba (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 18.85,
+      "lng": -97.1
+    },
+    {
+      "cp": "06000",
+      "estado": "Ciudad de México",
+      "municipio": "Cuauhtémoc (ejemplo)",
+      "colonia": "Centro (ejemplo)",
+      "lat": 19.43,
+      "lng": -99.13
+    },
+    {
+      "cp": "03100",
+      "estado": "Ciudad de México",
+      "municipio": "Benito Juárez (ejemplo)",
+      "colonia": "Del Valle (ejemplo)",
+      "lat": 19.38,
+      "lng": -99.17
+    }
+  ]
+}

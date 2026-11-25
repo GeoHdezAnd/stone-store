@@ -6,11 +6,11 @@ import { MAX_ITEMS, MAX_ITEM_QUANTITY } from './weight';
 // Mensajes en español que no reproducen lo enviado. El peso NUNCA viene del navegador.
 
 /** Convierte cualquier error de zod en un mensaje en español (sin eco de datos). */
-const objectErrors = (label: string) => ({
+const objectErrors = (label: string, adjective: 'válido' | 'válida' = 'válido') => ({
   error: (iss: { code: string }) =>
     iss.code === 'unrecognized_keys'
       ? `${label} trae campos no permitidos`
-      : `${label} no es válido`,
+      : `${label} no es ${adjective}`,
 });
 
 export const freightItemRequestSchema = z.strictObject(
@@ -46,7 +46,7 @@ const postalCode = z
 /** Cuerpo de `POST /freight/estimate`. No acepta `distanciaKm`: la calcula el servidor. */
 export const freightEstimateRequestSchema = z.strictObject(
   { codigoPostal: postalCode, items: itemsSchema },
-  objectErrors('La solicitud'),
+  objectErrors('La solicitud', 'válida'),
 );
 export type FreightEstimateRequest = z.infer<typeof freightEstimateRequestSchema>;
 
@@ -60,7 +60,7 @@ export const freightSimulateRequestSchema = z.strictObject(
       .min(0, 'La distancia no puede ser negativa'),
     items: itemsSchema,
   },
-  objectErrors('La solicitud'),
+  objectErrors('La solicitud', 'válida'),
 );
 export type FreightSimulateRequest = z.infer<typeof freightSimulateRequestSchema>;
 

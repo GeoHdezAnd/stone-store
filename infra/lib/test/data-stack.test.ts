@@ -34,11 +34,13 @@ const TABLAS: Record<string, { name: string; type: 'HASH' | 'RANGE' }[]> = {
   Counters: [{ name: 'name', type: 'HASH' }],
   FreightConfig: [{ name: 'version', type: 'HASH' }],
   Quotes: [{ name: 'quoteId', type: 'HASH' }],
+  PostalCodes: [{ name: 'cp', type: 'HASH' }],
+  RouteCache: [{ name: 'cp', type: 'HASH' }],
 };
 
 describe('DataStack', () => {
-  it('crea las 10 tablas', () => {
-    synth('dev').resourceCountIs('AWS::DynamoDB::Table', 10);
+  it('crea las 12 tablas', () => {
+    synth('dev').resourceCountIs('AWS::DynamoDB::Table', 12);
   });
 
   it.each(Object.entries(TABLAS))('la tabla %s tiene su clave exacta', (_nombre, claves) => {
@@ -52,20 +54,32 @@ describe('DataStack', () => {
     expect(keySchemas).toContainEqual(claves);
   });
 
-  it('solo Counters tiene TTL, sobre el atributo `ttl` (contadores del límite de solicitudes)', () => {
+  it('solo Counters y RouteCache tienen TTL, sobre el atributo `ttl`', () => {
     const tablas = synth('dev').findResources('AWS::DynamoDB::Table');
     const conTtl = Object.entries(tablas).filter(
       ([, t]) => t.Properties.TimeToLiveSpecification !== undefined,
     );
-    expect(conTtl).toHaveLength(1);
-    const [id, t] = conTtl[0]!;
-    expect(id).toMatch(/^Counters/);
-    expect(t.Properties.TimeToLiveSpecification).toEqual({ AttributeName: 'ttl', Enabled: true });
+    expect(conTtl.map(([id]) => id.replace(/[0-9A-F]{8}$/, '')).sort()).toEqual([
+      'Counters',
+      'RouteCache',
+    ]);
+    for (const [, t] of conTtl) {
+      expect(t.Properties.TimeToLiveSpecification).toEqual({ AttributeName: 'ttl', Enabled: true });
+    }
+  });
+
+  it('PostalCodes y RouteCache no llevan índices secundarios', () => {
+    const tablas = Object.entries(synth('dev').findResources('AWS::DynamoDB::Table'));
+    for (const [id, t] of tablas) {
+      if (/^(PostalCodes|RouteCache)/.test(id)) {
+        expect(t.Properties.GlobalSecondaryIndexes, id).toBeUndefined();
+      }
+    }
   });
 
   it('todas las tablas son PAY_PER_REQUEST', () => {
     const tablas = Object.values(synth('dev').findResources('AWS::DynamoDB::Table'));
-    expect(tablas).toHaveLength(10);
+    expect(tablas).toHaveLength(12);
     for (const t of tablas) expect(t.Properties.BillingMode).toBe('PAY_PER_REQUEST');
   });
 
@@ -139,7 +153,7 @@ describe('DataStack', () => {
 
   it('en prod se conservan, con protección contra borrado y PITR', () => {
     const tablas = Object.values(synth('prod').findResources('AWS::DynamoDB::Table'));
-    expect(tablas).toHaveLength(10);
+    expect(tablas).toHaveLength(12);
     for (const t of tablas) {
       expect(t.DeletionPolicy).toBe('Retain');
       expect(t.Properties.DeletionProtectionEnabled).toBe(true);
@@ -173,7 +187,7 @@ describe('DataStack', () => {
 describe('DataStack: MailOutbox (solo emulador)', () => {
   it('con emulador agrega MailOutbox (pk messageId, sin índices) y su salida', () => {
     const t = synth('dev', true);
-    t.resourceCountIs('AWS::DynamoDB::Table', 11);
+    t.resourceCountIs('AWS::DynamoDB::Table', 13);
     const tablas = Object.values(t.findResources('AWS::DynamoDB::Table'));
     const outbox = tablas.find(
       (x) =>

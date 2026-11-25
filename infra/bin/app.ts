@@ -107,6 +107,8 @@ new ApiStack(app, `canteras-api-${deploy.name}`, {
     freightConfig: data.freightConfig,
     quotes: data.quotes,
     counters: data.counters,
+    postalCodes: data.postalCodes,
+    routeCache: data.routeCache,
     ...(data.mailOutbox ? { mailOutbox: data.mailOutbox } : {}),
   },
   allowedOrigins,

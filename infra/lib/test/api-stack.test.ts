@@ -77,6 +77,8 @@ function build(opts: BuildOptions = {}): {
       freightConfig: data.freightConfig,
       quotes: data.quotes,
       counters: data.counters,
+      postalCodes: data.postalCodes,
+      routeCache: data.routeCache,
       ...(data.mailOutbox ? { mailOutbox: data.mailOutbox } : {}),
     },
     ...(allowedOrigins ? { allowedOrigins } : {}),
@@ -104,11 +106,12 @@ function rutas(t: Template): Props[] {
  * INVARIANTE DE SEGURIDAD. Devuelve la lista de problemas (vacía = todo bien):
  * - debe haber rutas (evita pruebas vacuosas);
  * - no puede existir `$default` ni catch-all;
- * - `GET /health` y `POST /quotes` (el formulario público) son las ÚNICAS rutas sin authorizer y
+ * - `GET /health`, `POST /quotes` (el formulario público) y `POST /freight/estimate` (el estimado de
+ *   flete público) son las ÚNICAS rutas sin authorizer y
  *   deben ser públicas explícitas (NONE, sin authorizer);
  * - todas las demás: AuthorizationType JWT con AuthorizerId.
  */
-export const RUTAS_PUBLICAS = ['GET /health', 'POST /quotes'] as const;
+export const RUTAS_PUBLICAS = ['GET /health', 'POST /quotes', 'POST /freight/estimate'] as const;
 
 export function problemasDeSeguridad(t: Template): string[] {
   const problemas: string[] = [];
@@ -177,6 +180,7 @@ describe('ApiStack: invariante de seguridad de las rutas', () => {
         'ANY /admin/stones',
         'ANY /admin/stones/{proxy+}',
         'GET /health',
+        'POST /freight/estimate',
         'POST /quotes',
       ].sort(),
     );
@@ -441,14 +445,15 @@ describe('ApiStack: Lambdas', () => {
       'services/api/src/admin-freight/handler.ts',
       'services/api/src/admin-quotes/handler.ts',
       'services/api/src/quotes-create/handler.ts',
+      'services/api/src/freight-estimate/handler.ts',
     ]) {
       expect(existsSync(join(REPO, p)), p).toBe(true);
     }
   });
 
-  it('hay 9 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
+  it('hay 10 funciones nodejs22.x, 256 MB, 10 s, handler `handler`', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Lambda::Function', 9);
+    t.resourceCountIs('AWS::Lambda::Function', 10);
     t.allResourcesProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
       MemorySize: 256,
@@ -459,7 +464,7 @@ describe('ApiStack: Lambdas', () => {
 
   it('cada función tiene su log group con retención de 1 semana (sin logRetention)', () => {
     const t = synth();
-    t.resourceCountIs('AWS::Logs::LogGroup', 9);
+    t.resourceCountIs('AWS::Logs::LogGroup', 10);
     t.allResourcesProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
     t.allResourcesProperties('AWS::Lambda::Function', {
       LoggingConfig: { LogGroup: { Ref: Match.stringLikeRegexp('Logs') } },
@@ -514,6 +519,7 @@ describe('ApiStack: Lambdas', () => {
       'ANY /admin/freight': /AdminFreight/,
       'ANY /admin/freight/{proxy+}': /AdminFreight/,
       'POST /quotes': /QuotesCreate/,
+      'POST /freight/estimate': /FreightEstimate/,
       'ANY /admin/quotes': /AdminQuotes/,
       'ANY /admin/quotes/{proxy+}': /AdminQuotes/,
       ...Object.fromEntries(
@@ -915,6 +921,8 @@ describe('ApiStack: Lambda AdminMedia', () => {
         freightConfig: data.freightConfig,
         quotes: data.quotes,
         counters: data.counters,
+        postalCodes: data.postalCodes,
+        routeCache: data.routeCache,
       },
     });
     const dir = app.synth().directory;
@@ -1105,6 +1113,8 @@ describe('ApiStack: Lambda AdminSettings', () => {
         freightConfig: data.freightConfig,
         quotes: data.quotes,
         counters: data.counters,
+        postalCodes: data.postalCodes,
+        routeCache: data.routeCache,
       },
     });
     const dir = app.synth().directory;
@@ -1385,6 +1395,7 @@ describe('ApiStack: throttling por ruta de media', () => {
       'ANY /admin/media': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
       'ANY /admin/media/{proxy+}': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
       'POST /quotes': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
+      'POST /freight/estimate': { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 },
     });
   });
 
@@ -1397,7 +1408,7 @@ describe('ApiStack: throttling por ruta de media', () => {
       .sort();
     expect(reales).toHaveLength(2);
     expect(Object.keys(stage.Properties.RouteSettings).sort()).toEqual(
-      [...reales, 'POST /quotes'].sort(),
+      [...reales, 'POST /quotes', 'POST /freight/estimate'].sort(),
     );
   });
 });
@@ -1554,7 +1565,9 @@ describe('ApiStack: Lambda AdminFreight', () => {
     const t = synth();
     const stage = Object.values(t.findResources('AWS::ApiGatewayV2::Stage'))[0]!;
     const keys = Object.keys(stage.Properties.RouteSettings ?? {});
-    expect(keys.some((k) => k.includes('freight'))).toBe(false);
+    // Solo el estimado PÚBLICO tiene límite propio; las rutas de administración no.
+    expect(keys.filter((k) => k.includes('freight'))).toEqual(['POST /freight/estimate']);
+    expect(keys.some((k) => k.includes('/admin/freight'))).toBe(false);
   });
 });
 
@@ -1867,6 +1880,7 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
     'AdminPublish',
     'AdminFreight',
     'AdminQuotes',
+    'FreightEstimate',
   ];
 
   function conEntorno(opts: BuildOptions = {}) {
@@ -1904,13 +1918,16 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
     expect(fn.Properties.Runtime).toBe('nodejs22.x');
   });
 
-  it('el entorno tiene exactamente las 5 tablas, como referencias (no literales)', () => {
+  it('el entorno tiene exactamente las 7 tablas (como referencias, no literales) y ROUTE_PROVIDER', () => {
     const { vars, dt, data } = conEntorno();
     expect(Object.keys(vars).sort()).toEqual(
       [
         'COUNTERS_TABLE',
         'FREIGHT_CONFIG_TABLE',
+        'POSTAL_CODES_TABLE',
         'QUOTES_TABLE',
+        'ROUTE_CACHE_TABLE',
+        'ROUTE_PROVIDER',
         'SETTINGS_TABLE',
         'STONES_TABLE',
       ].sort(),
@@ -1921,6 +1938,8 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
       STONES_TABLE: data.stones,
       FREIGHT_CONFIG_TABLE: data.freightConfig,
       SETTINGS_TABLE: data.settings,
+      POSTAL_CODES_TABLE: data.postalCodes,
+      ROUTE_CACHE_TABLE: data.routeCache,
     };
     for (const [nombre, tabla] of Object.entries(esperado)) {
       expect(typeof vars[nombre], nombre).toBe('object');
@@ -1928,13 +1947,13 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
     }
   });
 
-  it('IAM EXACTA de DynamoDB: 6 sentencias, ninguna de más', () => {
+  it('IAM EXACTA de DynamoDB: 8 sentencias, ninguna de más', () => {
     const { dt, data, ss } = conEntorno();
     const dyn = ss.filter(esDynamo);
     const resumen = dyn
       .map((s) => ({
         tabla: tablasDeSentencia(dt, s),
-        acciones: lista(s['Action']),
+        acciones: [...lista(s['Action'])].sort(),
         efecto: s['Effect'],
         condicion: s['Condition'] ?? null,
       }))
@@ -1977,6 +1996,18 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
         acciones: ['dynamodb:GetItem'],
         efecto: 'Allow',
         condicion: { 'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC'] } },
+      },
+      {
+        tabla: [idDe(data, data.postalCodes)],
+        acciones: ['dynamodb:GetItem'],
+        efecto: 'Allow',
+        condicion: null,
+      },
+      {
+        tabla: [idDe(data, data.routeCache)],
+        acciones: ['dynamodb:GetItem', 'dynamodb:PutItem'],
+        efecto: 'Allow',
+        condicion: null,
       },
     ].sort((a, b) => String(a.tabla).localeCompare(String(b.tabla)));
     expect(resumen).toEqual(esperado);
@@ -2029,7 +2060,7 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
     expect(JSON.stringify(st[0])).not.toContain('MAIL');
   });
 
-  it('sin comodines ni acciones peligrosas; fuera de DynamoDB solo hay logs (sin SES, SSM ni S3 por defecto)', () => {
+  it('sin comodines ni acciones peligrosas; fuera de DynamoDB solo hay logs y la ruta de Location (sin SES, SSM ni S3 por defecto)', () => {
     const { ss } = conEntorno();
     for (const s of ss) {
       expect(s['Effect']).toBe('Allow');
@@ -2039,9 +2070,63 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
         expect(a).not.toMatch(
           /Scan|Query|DeleteItem|BatchWriteItem|TransactWriteItems|ConditionCheckItem|^s3:|^ses:|^ssm:|^kms:|^cloudfront:|^sns:|^lambda:/,
         );
-        if (!a.startsWith('dynamodb:')) expect(a).toMatch(/^logs:|^xray:/);
+        if (!a.startsWith('dynamodb:'))
+          expect(a).toMatch(/^logs:|^xray:|^geo-routes:CalculateRoutes$/);
       }
     }
+  });
+
+  describe('estimado de flete guardado en la solicitud (PostalCodes, RouteCache, Location)', () => {
+    const arnPlano = (r: unknown): string =>
+      JSON.stringify(r)
+        .replace(/\{"Ref":"AWS::Partition"\}/g, '"aws"')
+        .replace(/\{"Ref":"AWS::Region"\}/g, '"us-east-1"')
+        .replace(/^\{"Fn::Join":\["",\[(.*)\]\]\}$/, '$1')
+        .replace(/","/g, '')
+        .replace(/^"|"$/g, '');
+
+    it("ROUTE_PROVIDER es 'location' en AWS real (dev y prod) y 'haversine' con emulador", () => {
+      expect(conEntorno({ emulated: false }).vars['ROUTE_PROVIDER']).toBe('location');
+      expect(
+        conEntorno({ name: 'prod', allowedOrigins: ['https://admin.ejemplo.mx'] }).vars[
+          'ROUTE_PROVIDER'
+        ],
+      ).toBe('location');
+      expect(conEntorno({ emulated: true }).vars['ROUTE_PROVIDER']).toBe('haversine');
+    });
+
+    it('PostalCodes: SOLO GetItem; RouteCache: SOLO GetItem y PutItem (sin Scan/Query/Update/Delete)', () => {
+      const { dt, data, ss } = conEntorno();
+      const accionesDe = (tb: Table) =>
+        ss
+          .filter((s) => esDynamo(s) && tablasDeSentencia(dt, s).includes(idDe(data, tb)))
+          .flatMap((s) => lista(s['Action']) as string[])
+          .sort();
+      expect(accionesDe(data.postalCodes)).toEqual(['dynamodb:GetItem']);
+      expect(accionesDe(data.routeCache)).toEqual(['dynamodb:GetItem', 'dynamodb:PutItem']);
+    });
+
+    it('AWS real: geo-routes:CalculateRoutes SOLO sobre arn:aws:geo-routes:<región>::provider/default', () => {
+      for (const opts of [
+        {},
+        { name: 'prod' as const, allowedOrigins: ['https://admin.ejemplo.mx'] },
+      ]) {
+        const { ss } = conEntorno(opts);
+        const geo = ss.filter((s) => lista(s['Action']).some((a) => String(a).startsWith('geo-')));
+        expect(geo).toHaveLength(1);
+        expect(geo[0]!['Effect']).toBe('Allow');
+        expect(lista(geo[0]!['Action'])).toEqual(['geo-routes:CalculateRoutes']);
+        expect(geo[0]!['Condition']).toBeUndefined();
+        const recursos = lista(geo[0]!['Resource']);
+        expect(recursos).toHaveLength(1);
+        expect(arnPlano(recursos[0])).toBe('arn:aws:geo-routes:us-east-1::provider/default');
+      }
+    });
+
+    it('con emulador NO existe ningún permiso de geo-routes', () => {
+      const { ss } = conEntorno({ emulated: true });
+      expect(JSON.stringify(ss)).not.toContain('geo-');
+    });
   });
 
   describe('captcha (Turnstile)', () => {
@@ -2395,5 +2480,211 @@ describe('ApiStack: CORS del sitio público (SITE_ORIGINS)', () => {
   it('allowHeaders sigue incluyendo content-type (el formulario manda JSON)', () => {
     const api = Object.values(synth().findResources('AWS::ApiGatewayV2::Api'))[0]!;
     expect(api.Properties.CorsConfiguration.AllowHeaders).toContain('content-type');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Lambda FreightEstimate: `POST /freight/estimate` PÚBLICO (sin authorizer) que puede disparar una
+// llamada de PAGO a Amazon Location Service (Routes).
+// ---------------------------------------------------------------------------------------------
+
+describe('ApiStack: Lambda FreightEstimate (ruta pública)', () => {
+  const OTRAS = [
+    'Health',
+    'AdminMe',
+    'AdminCatalog',
+    'AdminMedia',
+    'AdminSettings',
+    'AdminPublish',
+    'AdminFreight',
+    'AdminQuotes',
+    // `QuotesCreate` también estima el flete al guardar la solicitud y recibe lo mismo que
+    // `FreightEstimate` (se prueba en su propio bloque); aquí solo van las que NO deben tenerlo.
+  ];
+  const idDe = (data: DataStack, tb: Table): string =>
+    data.getLogicalId(tb.node.defaultChild as CfnTable);
+  const esDynamo = (s: Json): boolean =>
+    lista(s['Action']).some((a) => String(a).startsWith('dynamodb:'));
+
+  function conEntorno(opts: BuildOptions = {}) {
+    const { stack, data } = build(opts);
+    const t = Template.fromStack(stack);
+    const dt = Template.fromStack(data);
+    const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, 'FreightEstimate')]!;
+    const vars = (fn.Properties.Environment?.Variables ?? {}) as Record<string, Json>;
+    return { t, dt, data, vars, ss: sentenciasDe(t, 'FreightEstimate') };
+  }
+
+  /** Resuelve Partition y Region de un ARN armado con `formatArn` a texto plano. */
+  const arnPlano = (r: unknown): string =>
+    JSON.stringify(r)
+      .replace(/\{"Ref":"AWS::Partition"\}/g, '"aws"')
+      .replace(/\{"Ref":"AWS::Region"\}/g, '"us-east-1"')
+      .replace(/\{"Ref":"AWS::AccountId"\}/g, '"123456789012"')
+      .replace(/^\{"Fn::Join":\["",\[(.*)\]\]\}$/, '$1')
+      .replace(/","/g, '')
+      .replace(/^"|"$/g, '');
+
+  it('`POST /freight/estimate` es la única ruta de la Lambda, es pública explícita y sin authorizer', () => {
+    const t = synth();
+    const fn = idFuncion(t, 'FreightEstimate');
+    const integraciones = t.findResources('AWS::ApiGatewayV2::Integration');
+    const suyas = rutas(t).filter((r) => {
+      const target = JSON.stringify(r['Target']);
+      const idInt = Object.keys(integraciones).find((id) => target.includes(`"${id}"`))!;
+      return JSON.stringify(integraciones[idInt]!.Properties.IntegrationUri).includes(`"${fn}"`);
+    });
+    expect(suyas.map((r) => r['RouteKey'])).toEqual(['POST /freight/estimate']);
+    expect(suyas[0]!['AuthorizationType']).toBe('NONE');
+    expect(suyas[0]!['AuthorizerId']).toBeUndefined();
+  });
+
+  it('el entorno tiene exactamente las 4 tablas (como referencias) y ROUTE_PROVIDER', () => {
+    const { vars, dt, data } = conEntorno();
+    expect(Object.keys(vars).sort()).toEqual(
+      [
+        'FREIGHT_CONFIG_TABLE',
+        'POSTAL_CODES_TABLE',
+        'ROUTE_CACHE_TABLE',
+        'ROUTE_PROVIDER',
+        'STONES_TABLE',
+      ].sort(),
+    );
+    const esperado: Record<string, Table> = {
+      FREIGHT_CONFIG_TABLE: data.freightConfig,
+      STONES_TABLE: data.stones,
+      POSTAL_CODES_TABLE: data.postalCodes,
+      ROUTE_CACHE_TABLE: data.routeCache,
+    };
+    for (const [nombre, tabla] of Object.entries(esperado)) {
+      expect(typeof vars[nombre], nombre).toBe('object');
+      expect(tablaDeImport(dt, vars[nombre]!), nombre).toBe(idDe(data, tabla));
+    }
+  });
+
+  it("ROUTE_PROVIDER es 'location' en AWS real (dev y prod) y 'haversine' con emulador", () => {
+    expect(conEntorno({ emulated: false }).vars['ROUTE_PROVIDER']).toBe('location');
+    expect(
+      conEntorno({ name: 'prod', allowedOrigins: ['https://admin.ejemplo.mx'] }).vars[
+        'ROUTE_PROVIDER'
+      ],
+    ).toBe('location');
+    expect(conEntorno({ emulated: true }).vars['ROUTE_PROVIDER']).toBe('haversine');
+  });
+
+  it('IAM EXACTA de DynamoDB: solo estas acciones por tabla, sin condiciones ni comodines', () => {
+    const { dt, data, ss } = conEntorno();
+    const porTabla = new Map<string, string[]>();
+    for (const s of ss.filter(esDynamo)) {
+      expect(s['Effect']).toBe('Allow');
+      expect(s['Condition']).toBeUndefined();
+      const tablas = tablasDeSentencia(dt, s);
+      expect(tablas).toHaveLength(1);
+      porTabla.set(tablas[0]!, [
+        ...(porTabla.get(tablas[0]!) ?? []),
+        ...(lista(s['Action']) as string[]),
+      ]);
+    }
+    const ordenado = (m: Map<string, string[]>) =>
+      [...m.entries()]
+        .map(([k, v]) => [k, [...v].sort()] as const)
+        .sort((a, b) => a[0].localeCompare(b[0]));
+    expect(ordenado(porTabla)).toEqual(
+      ordenado(
+        new Map([
+          [idDe(data, data.freightConfig), ['dynamodb:GetItem']],
+          [idDe(data, data.stones), ['dynamodb:BatchGetItem']],
+          [idDe(data, data.postalCodes), ['dynamodb:GetItem']],
+          [idDe(data, data.routeCache), ['dynamodb:GetItem', 'dynamodb:PutItem']],
+        ]),
+      ),
+    );
+  });
+
+  it('ni Quotes, ni Counters, ni Settings, ni AuditLog, ni S3/SES/SSM', () => {
+    const { dt, data, ss } = conEntorno({
+      sesIdentityArn: 'arn:aws:ses:us-east-1:123456789012:identity/ventas@example.com',
+      turnstileSecretParam: '/canteras/dev/turnstile-secret',
+    });
+    const prohibidas = [data.quotes, data.counters, data.settings, data.auditLog].map((x) =>
+      idDe(data, x),
+    );
+    for (const s of ss.filter(esDynamo)) {
+      for (const tabla of tablasDeSentencia(dt, s)) expect(prohibidas).not.toContain(tabla);
+    }
+    for (const s of ss) {
+      for (const a of lista(s['Action'])) {
+        expect(String(a)).toMatch(/^(dynamodb|geo-routes|logs|xray):/);
+      }
+      for (const r of lista(s['Resource'])) expect(JSON.stringify(r)).not.toBe('"*"');
+    }
+  });
+
+  it('AWS real: geo-routes:CalculateRoutes SOLO sobre arn:aws:geo-routes:<región>::provider/default', () => {
+    for (const opts of [
+      {},
+      { name: 'prod' as const, allowedOrigins: ['https://admin.ejemplo.mx'] },
+    ]) {
+      const { ss } = conEntorno(opts);
+      const geo = ss.filter((s) => lista(s['Action']).some((a) => String(a).startsWith('geo-')));
+      expect(geo).toHaveLength(1);
+      expect(geo[0]!['Effect']).toBe('Allow');
+      expect(lista(geo[0]!['Action'])).toEqual(['geo-routes:CalculateRoutes']);
+      expect(geo[0]!['Condition']).toBeUndefined();
+      const recursos = lista(geo[0]!['Resource']);
+      expect(recursos).toHaveLength(1);
+      expect(arnPlano(recursos[0])).toBe('arn:aws:geo-routes:us-east-1::provider/default');
+    }
+  });
+
+  it('con emulador NO existe ningún permiso de geo-routes (Floci no tiene Location Service)', () => {
+    const { ss } = conEntorno({ emulated: true });
+    expect(JSON.stringify(ss)).not.toContain('geo-');
+  });
+
+  it('ninguna otra Lambda recibe geo-routes, ROUTE_PROVIDER ni acceso a PostalCodes/RouteCache', () => {
+    for (const emulated of [false, true]) {
+      const { stack, data } = build({ emulated });
+      const t = Template.fromStack(stack);
+      const dt = Template.fromStack(data);
+      const ocultas = [idDe(data, data.postalCodes), idDe(data, data.routeCache)];
+      for (const f of OTRAS) {
+        expect(JSON.stringify(sentenciasDe(t, f)), f).not.toContain('geo-');
+        for (const s of sentenciasDe(t, f)) {
+          if (!esDynamo(s)) continue;
+          if (lista(s['Resource']).some((r) => JSON.stringify(r).includes('/index/'))) continue;
+          for (const tabla of tablasDeSentencia(dt, s)) expect(ocultas, f).not.toContain(tabla);
+        }
+        const fn = t.findResources('AWS::Lambda::Function')[idFuncion(t, f)]!;
+        const vars = Object.keys(fn.Properties.Environment?.Variables ?? {});
+        for (const v of ['ROUTE_PROVIDER', 'POSTAL_CODES_TABLE', 'ROUTE_CACHE_TABLE']) {
+          expect(vars, `${f} ${v}`).not.toContain(v);
+        }
+      }
+    }
+  });
+
+  it('el estimado público: 5 rps / ráfaga 10 en su ruta y la etapa conserva 10/20', () => {
+    const stage = Object.values(synth().findResources('AWS::ApiGatewayV2::Stage'))[0]!;
+    expect(stage.Properties.DefaultRouteSettings).toEqual({
+      ThrottlingRateLimit: 10,
+      ThrottlingBurstLimit: 20,
+    });
+    expect(stage.Properties.RouteSettings['POST /freight/estimate']).toEqual({
+      ThrottlingRateLimit: 5,
+      ThrottlingBurstLimit: 10,
+    });
+  });
+
+  it('el CORS del sitio público cubre la ruta (mismos orígenes que POST /quotes)', () => {
+    const t = synth({
+      name: 'prod',
+      allowedOrigins: ['https://admin.ejemplo.mx'],
+      siteOrigins: ['https://www.ejemplo.mx'],
+    });
+    const cors = Object.values(t.findResources('AWS::ApiGatewayV2::Api'))[0]!.Properties
+      .CorsConfiguration as Json;
+    expect(cors['AllowOrigins']).toContain('https://www.ejemplo.mx');
+    expect(cors['AllowMethods']).toContain('POST');
   });
 });

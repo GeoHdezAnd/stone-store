@@ -48,6 +48,10 @@ export interface ApiTables {
   readonly quotes: TableRef;
   /** Contadores de folio (`folio#<año>`): solo los toca `QuotesCreate`. */
   readonly counters: TableRef;
+  /** Códigos postales con coordenadas: los leen `FreightEstimate` y `QuotesCreate`. */
+  readonly postalCodes: TableRef;
+  /** Caché de distancias por CP (TTL 90 días): la tocan `FreightEstimate` y `QuotesCreate`. */
+  readonly routeCache: TableRef;
   /** Solo con emulador (DataStack): bandeja de salida de correos de desarrollo. */
   readonly mailOutbox?: TableRef;
 }
@@ -116,6 +120,12 @@ const MEDIA_ROUTE_KEYS = ['ANY /admin/media', 'ANY /admin/media/{proxy+}'] as co
 // Ruta PÚBLICA del formulario de cotización: límite propio (1 req/s, ráfaga 2) además del de la etapa.
 const QUOTES_CREATE_ROUTE_KEY = 'POST /quotes';
 
+// Ruta PÚBLICA del estimado de flete: puede disparar una llamada de PAGO a Location Service (Routes),
+// así que lleva su propio límite (5 req/s, ráfaga 10), más holgado que el del formulario porque el
+// sitio la llama mientras el cliente escribe (con debounce) y casi siempre responde desde la caché.
+const FREIGHT_ESTIMATE_ROUTE_KEY = 'POST /freight/estimate';
+const FREIGHT_ESTIMATE_THROTTLE = { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 } as const;
+
 // Nombre jerárquico de SSM: `/a/b-c_d.e`, sin comodines, sin `//` ni barra final, máx. 1011 caracteres.
 // (Mismo criterio que `services/api/src/quotes-create/config.ts`; infra no importa código de runtime.)
 const SSM_PARAM_NAME_RE = /^\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
@@ -183,6 +193,7 @@ export class ApiStack extends Stack {
   public readonly adminFreightFunction: IFunction;
   public readonly adminQuotesFunction: IFunction;
   public readonly quotesCreateFunction: IFunction;
+  public readonly freightEstimateFunction: IFunction;
 
   public constructor(scope: Construct, id: string, props: ApiStackProps) {
     const {
@@ -272,12 +283,15 @@ export class ApiStack extends Stack {
     // emite `addAdminResource('media')`. Floci NO aplica throttling: solo cuenta en AWS real.
     // Lo mismo para `POST /quotes`, que es PÚBLICA: acota el abuso (spam de solicitudes y de correos).
     // API Gateway HTTP API no limita por IP, solo por ruta/etapa.
-    (stage.node.defaultChild as CfnStage).routeSettings = Object.fromEntries(
-      [...MEDIA_ROUTE_KEYS, QUOTES_CREATE_ROUTE_KEY].map((k) => [
-        k,
-        { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
-      ]),
-    );
+    (stage.node.defaultChild as CfnStage).routeSettings = {
+      ...Object.fromEntries(
+        [...MEDIA_ROUTE_KEYS, QUOTES_CREATE_ROUTE_KEY].map((k) => [
+          k,
+          { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 },
+        ]),
+      ),
+      [FREIGHT_ESTIMATE_ROUTE_KEY]: FREIGHT_ESTIMATE_THROTTLE,
+    };
 
     const makeFunction = (
       name: string,
@@ -645,6 +659,10 @@ export class ApiStack extends Stack {
     // - Stones: `BatchGetItem` (las piedras pedidas, para calcular el peso en el servidor).
     // - FreightConfig: `GetItem` (puntero ACTIVE y versión activa: de ahí sale la merma).
     // - Settings: `GetItem` de la fila PUBLIC (remitente y patio; nunca la MAIL).
+    // - Estimado de flete guardado en la solicitud (best-effort, recalculado en el servidor con la
+    //   misma lógica que `FreightEstimate`): PostalCodes `GetItem`; RouteCache `GetItem` y `PutItem`;
+    //   y `geo-routes:CalculateRoutes` sobre el proveedor por defecto SOLO en AWS real (con emulador
+    //   `ROUTE_PROVIDER=haversine`). Solo se paga una ruta tras captcha, validación y límite.
     // - Correo: SES (`ses:SendEmail` sobre la identidad) o, con emulador, PutItem en MailOutbox.
     // - Captcha: `ssm:GetParameter` SOLO sobre el parámetro del secreto de Turnstile y solo en AWS real.
     // Sin AuditLog (el actor es anónimo; la solicitud misma es el registro), sin S3, sin KMS explícito
@@ -658,6 +676,9 @@ export class ApiStack extends Stack {
     quotesCreate.addEnvironment('STONES_TABLE', tables.stones.tableName);
     quotesCreate.addEnvironment('FREIGHT_CONFIG_TABLE', tables.freightConfig.tableName);
     quotesCreate.addEnvironment('SETTINGS_TABLE', tables.settings.tableName);
+    quotesCreate.addEnvironment('POSTAL_CODES_TABLE', tables.postalCodes.tableName);
+    quotesCreate.addEnvironment('ROUTE_CACHE_TABLE', tables.routeCache.tableName);
+    quotesCreate.addEnvironment('ROUTE_PROVIDER', deploy.emulated ? 'haversine' : 'location');
     if (adminBase !== undefined) quotesCreate.addEnvironment('ADMIN_BASE_URL', adminBase);
     quotesCreate.addToRolePolicy(
       new PolicyStatement({
@@ -712,6 +733,35 @@ export class ApiStack extends Stack {
         },
       }),
     );
+    for (const [actions, table] of [
+      [['dynamodb:GetItem'], tables.postalCodes],
+      [['dynamodb:GetItem', 'dynamodb:PutItem'], tables.routeCache],
+    ] as const) {
+      quotesCreate.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: [...actions],
+          resources: [table.tableArn],
+        }),
+      );
+    }
+    if (!deploy.emulated) {
+      quotesCreate.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ['geo-routes:CalculateRoutes'],
+          // `arn:<partición>:geo-routes:<región>::provider/default` (sin cuenta: es un proveedor de AWS).
+          resources: [
+            this.formatArn({
+              service: 'geo-routes',
+              account: '',
+              resource: 'provider',
+              resourceName: 'default',
+            }),
+          ],
+        }),
+      );
+    }
     if (deploy.emulated) {
       // Emulador: correo a la bandeja MailOutbox y verificador de captcha falso (token `test-pass`).
       // NUNCA existe en AWS real: es lo que impide aceptar solicitudes sin verificar.
@@ -767,7 +817,58 @@ export class ApiStack extends Stack {
       }
     }
 
-    // Rutas públicas, marcadas explícitamente: `GET /health` y `POST /quotes`. Cualquier otra ruta
+    // Estimado de flete público (`POST /freight/estimate`, CLAUDE.md 7.1): ruta SIN authorizer que puede
+    // disparar una llamada de pago a Amazon Location Service (servicio de mapas y rutas de AWS: la
+    // distancia por carretera cuesta por solicitud, por eso hay caché en `RouteCache`). Mínimo
+    // privilegio con sentencias explícitas (sin `grant*`):
+    // - FreightConfig: `GetItem` (puntero ACTIVE y versión activa: camiones, zonas, origen, maxKm).
+    // - Stones: `BatchGetItem` (las piedras pedidas, para calcular el peso en el servidor).
+    // - PostalCodes: `GetItem` (coordenadas del destino).
+    // - RouteCache: `GetItem` y `PutItem` (distancias ya calculadas, TTL 90 días).
+    // - Location Service: `geo-routes:CalculateRoutes` sobre el proveedor por defecto, SOLO en AWS
+    //   real (Floci no lo tiene: ahí `ROUTE_PROVIDER=haversine` calcula una aproximación local).
+    // Sin Quotes, Counters, Settings, AuditLog, S3, SES ni SSM. Se empaqueta TODO el SDK (versiones
+    // fijadas). Floci NO aplica IAM: se verifica en AWS real.
+    const freightEstimate = makeFunction('FreightEstimate', 'freight-estimate', []);
+    this.freightEstimateFunction = freightEstimate;
+    freightEstimate.addEnvironment('FREIGHT_CONFIG_TABLE', tables.freightConfig.tableName);
+    freightEstimate.addEnvironment('STONES_TABLE', tables.stones.tableName);
+    freightEstimate.addEnvironment('POSTAL_CODES_TABLE', tables.postalCodes.tableName);
+    freightEstimate.addEnvironment('ROUTE_CACHE_TABLE', tables.routeCache.tableName);
+    freightEstimate.addEnvironment('ROUTE_PROVIDER', deploy.emulated ? 'haversine' : 'location');
+    for (const [actions, table] of [
+      [['dynamodb:GetItem'], tables.freightConfig],
+      [['dynamodb:BatchGetItem'], tables.stones],
+      [['dynamodb:GetItem'], tables.postalCodes],
+      [['dynamodb:GetItem', 'dynamodb:PutItem'], tables.routeCache],
+    ] as const) {
+      freightEstimate.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: [...actions],
+          resources: [table.tableArn],
+        }),
+      );
+    }
+    if (!deploy.emulated) {
+      freightEstimate.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ['geo-routes:CalculateRoutes'],
+          // `arn:<partición>:geo-routes:<región>::provider/default` (sin cuenta: es un proveedor de AWS).
+          resources: [
+            this.formatArn({
+              service: 'geo-routes',
+              account: '',
+              resource: 'provider',
+              resourceName: 'default',
+            }),
+          ],
+        }),
+      );
+    }
+
+    // Rutas públicas, marcadas explícitamente: `GET /health`, `POST /quotes` y `POST /freight/estimate`. Cualquier otra ruta
     // sin authorizer rompe el invariante de api-stack.test.ts.
     this.httpApi.addRoutes({
       path: '/health',
@@ -779,6 +880,12 @@ export class ApiStack extends Stack {
       path: '/quotes',
       methods: [HttpMethod.POST],
       integration: new HttpLambdaIntegration('QuotesCreateIntegration', quotesCreate),
+      authorizer: new HttpNoneAuthorizer(),
+    });
+    this.httpApi.addRoutes({
+      path: '/freight/estimate',
+      methods: [HttpMethod.POST],
+      integration: new HttpLambdaIntegration('FreightEstimateIntegration', freightEstimate),
       authorizer: new HttpNoneAuthorizer(),
     });
 

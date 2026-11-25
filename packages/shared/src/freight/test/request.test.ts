@@ -136,3 +136,18 @@ describe('parseFreightSimulateRequest', () => {
     }
   });
 });
+
+describe('mensajes de objeto inválido (concordancia de género)', () => {
+  it('«La solicitud no es válida» para cuerpos que no son objeto', () => {
+    for (const raw of [null, [], 'x', 3]) {
+      expect(errores(parseFreightEstimateRequest(raw))).toEqual(['La solicitud no es válida']);
+      expect(errores(parseFreightSimulateRequest(raw))).toEqual(['La solicitud no es válida']);
+    }
+  });
+
+  it('«Cada renglón no es válido» para un renglón que no es objeto', () => {
+    expect(errores(parseFreightEstimateRequest({ ...valido, items: ['x'] }))).toEqual([
+      'Cada renglón no es válido',
+    ]);
+  });
+});

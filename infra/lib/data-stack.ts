@@ -27,8 +27,8 @@ export interface DataStackProps extends StackProps {
 
 /**
  * Datos del negocio en DynamoDB (on-demand: pagas por uso, casi gratis con poco tráfico).
- * Un solo índice secundario por ahora (el GSI disperso de AuditLog) y sin TTL; el resto llega con
- * las fases que lo necesiten (`Quotes`, con sus 2 GSI, llega en la fase 3.3).
+ * Índices secundarios solo en `AuditLog` (GSI disperso) y `Quotes` (2 GSI). TTL solo en `Counters`
+ * (límite de solicitudes) y `RouteCache` (distancias por CP, 90 días).
  */
 export class DataStack extends Stack {
   public readonly stones: Table;
@@ -41,6 +41,8 @@ export class DataStack extends Stack {
   public readonly counters: Table;
   public readonly freightConfig: Table;
   public readonly quotes: Table;
+  public readonly postalCodes: Table;
+  public readonly routeCache: Table;
   /** Solo con emulador: bandeja de salida de correos de desarrollo (ver `OutboxMailer`). */
   public readonly mailOutbox?: Table;
 
@@ -111,6 +113,13 @@ export class DataStack extends Stack {
     // mismo despliegue (el límite de un GSI por actualización aplica solo a tablas existentes).
     // Los folios salen de `Counters` (`folio#<año>`).
     this.quotes = make('Quotes', string('quoteId'));
+    // Códigos postales (`cp`, estado, municipio, colonia, lat, lng): de aquí sale el destino del
+    // estimado de flete. Se carga con `scripts/seed-postal-codes.ts` (hoy solo datos de ejemplo).
+    this.postalCodes = make('PostalCodes', string('cp'));
+    // Caché de distancias por carretera por CP (`cp`, `distanciaKm`, `origen`, `calculadoAt`, `ttl`):
+    // evita repetir llamadas de pago a Location Service. DynamoDB borra solo las filas vencidas
+    // (`ttl` = segundos epoch, ~90 días).
+    this.routeCache = make('RouteCache', string('cp'), undefined, 'ttl');
     // Bandeja de salida de correos SOLO para el emulador: Floci puede no soportar SES, así que ahí
     // `OutboxMailer` guarda el correo renderizado (con datos de ejemplo) en esta tabla. No existe en
     // AWS real, donde se envía con SES.
