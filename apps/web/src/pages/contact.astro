@@ -1,8 +1,105 @@
 ---
-import UnderConstruction from '../components/UnderConstruction.astro';
+import JsonLd from '../components/JsonLd.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { loadCatalog } from '../lib/catalog-loader';
+
+const { catalog } = await loadCatalog();
+const { settings } = catalog;
+
+const whatsappUrl = `https://wa.me/${settings.whatsapp}`;
+const mapUrl = `https://www.openstreetmap.org/?mlat=${settings.lat}&mlon=${settings.lng}#map=13/${settings.lat}/${settings.lng}`;
+
+const business = {
+  '@context': 'https://schema.org',
+  '@type': 'LocalBusiness',
+  name: settings.nombrePatio,
+  address: settings.direccion,
+  geo: { '@type': 'GeoCoordinates', latitude: settings.lat, longitude: settings.lng },
+  areaServed: ['Puebla', 'Tlaxcala', 'Veracruz', 'Ciudad de México'],
+  email: settings.correoRemitente,
+};
 ---
 
-<BaseLayout title="Contacto">
-  <UnderConstruction eyebrow="Contacto" title="Información del negocio y mapa" />
+<BaseLayout
+  title="Contacto"
+  description="Dónde está el patio, horario y cómo escribirnos por WhatsApp o pedir una cotización."
+>
+  <JsonLd slot="head" data={business} />
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">Contacto</span>
+      <h1 class="page-title">Ven al patio o escríbenos</h1>
+      <p class="lead">
+        Escoge la piedra frente al bloque, no en una foto. Si prefieres, cuéntanos tu obra y te
+        respondemos en menos de 48 horas.
+      </p>
+    </section>
+    <hr class="rule" />
+    <div class="contact">
+      <div>
+        <p class="notice notice--example" role="note">
+          <strong>Datos de ejemplo.</strong> Dirección, horario, WhatsApp y correo son provisionales
+          y no pertenecen a un negocio real.
+        </p>
+        <table class="table specs">
+          <tbody>
+            <tr>
+              <th scope="row">Patio</th>
+              <td>
+                {settings.nombrePatio}. {settings.direccion}
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Horario</th>
+              <td>{settings.horario}</td>
+            </tr>
+            <tr>
+              <th scope="row">WhatsApp</th>
+              <td>
+                <a href={whatsappUrl} rel="noopener">
+                  +{settings.whatsapp}
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Correo</th>
+              <td>
+                <a href={`mailto:${settings.correoRemitente}`}>{settings.correoRemitente}</a>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Entregas</th>
+              <td>Puebla, Tlaxcala, Veracruz y Ciudad de México</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="btn-row">
+          <a class="btn btn-primary" href="/quote/">
+            Pedir cotización
+          </a>
+          <a class="btn btn-ghost" href={whatsappUrl} rel="noopener">
+            Escribir por WhatsApp
+          </a>
+          <a class="btn btn-ghost" href="/quote/?motivo=visita">
+            Agendar visita al patio
+          </a>
+        </div>
+      </div>
+      <aside aria-labelledby="h-map">
+        <h2 class="label" id="h-map">
+          Ubicación del patio
+        </h2>
+        <!-- PLACEHOLDER: mapa real pendiente (dirección y coordenadas exactas las da el dueño). -->
+        <div class="map-placeholder" role="img" aria-label="Mapa del patio (próximamente)">
+          <span aria-hidden="true">Mapa próximamente</span>
+        </div>
+        <p class="note">
+          Ubicación de ejemplo (aprox. {settings.lat}, {settings.lng}).
+          <a href={mapUrl} rel="noopener">
+            Ver en OpenStreetMap
+          </a>
+        </p>
+      </aside>
+    </div>
+  </main>
 </BaseLayout>

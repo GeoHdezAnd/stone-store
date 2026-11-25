@@ -2,20 +2,33 @@
 import '@canteras/ui/fonts.css';
 import '@canteras/ui/styles.css';
 import '../styles/site.css';
+import '../styles/pages.css';
 import SiteHeader from '../components/SiteHeader.astro';
 import { loadCatalog } from '../lib/catalog-loader';
+import { mediaUrl } from '../lib/media';
 
 interface Props {
   title: string;
   description?: string;
+  /** Clave de S3 de la foto para la vista previa al compartir (Open Graph). */
+  ogImage?: string | null | undefined;
+  /** `article` en fichas y proyectos; `website` en el resto. */
+  ogType?: 'website' | 'article';
 }
 
 const {
   title,
   description = 'Piedra natural de San Salvador el Seco, Puebla: catálogo y cotización.',
+  ogImage,
+  ogType = 'website',
 } = Astro.props;
 const { catalog } = await loadCatalog();
 const { settings } = catalog;
+
+// URLs absolutas solo si hay `site` (variable PUBLIC_SITE_URL, ver astro.config.ts).
+const fullTitle = `${title} | Canteras Naturales`;
+const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : undefined;
+const imageUrl = ogImage ? new URL(mediaUrl(ogImage), Astro.site ?? Astro.url).href : undefined;
 ---
 
 <!doctype html>
@@ -23,9 +36,20 @@ const { settings } = catalog;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title} | Canteras Naturales</title>
+    <title>{fullTitle}</title>
     <meta name="description" content={description} />
     <meta name="theme-color" content="#f3f2f2" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    {canonical && <link rel="canonical" href={canonical} />}
+    <meta property="og:site_name" content="Canteras Naturales" />
+    <meta property="og:locale" content="es_MX" />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    {canonical && <meta property="og:url" content={canonical} />}
+    {imageUrl && <meta property="og:image" content={imageUrl} />}
+    <meta name="twitter:card" content={imageUrl ? 'summary_large_image' : 'summary'} />
+    <slot name="head" />
   </head>
   <body>
     <a class="skip-link" href="#contenido">
@@ -52,6 +76,18 @@ const { settings } = catalog;
           </p>
           <p>
             <a href="/quote/?motivo=visita">Agendar visita al patio</a>
+          </p>
+          <p>
+            <a href="/contact/">Cómo llegar</a>
+          </p>
+        </div>
+        <div>
+          <h2>Información</h2>
+          <p>
+            <a href="/about/">La cantera</a>
+          </p>
+          <p>
+            <a href="/aviso-de-privacidad/">Aviso de privacidad</a>
           </p>
         </div>
         <div>

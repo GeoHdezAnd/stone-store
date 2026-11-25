@@ -1,0 +1,234 @@
+/* Estilos de las páginas públicas de contenido (servicios, acabados, proyectos, la cantera,
+   contacto y la ficha de piedra con sus dos diseños). Va después de site.css. */
+
+/* Filtros por categoría (proyectos) */
+.filter-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 24px;
+}
+.filter-list .tag {
+  min-height: 32px;
+  padding-inline: 12px;
+  font-size: 13px;
+}
+.grid--projects-page {
+  padding-block: 32px 80px;
+}
+.grid--projects-page .tile {
+  gap: 12px;
+}
+.grid--projects-page .text-card h3 {
+  font-size: 20px;
+}
+
+/* Filas numeradas (servicios, la cantera) */
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.rows__item {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 16px;
+  padding-block: 28px;
+  border-bottom: 2px solid var(--color-divider);
+}
+.rows__item:last-child {
+  border-bottom: 0;
+}
+.rows__num {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 24px;
+  color: var(--color-accent-700);
+}
+.rows__item h2 {
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.rows__item p {
+  max-width: 62ch;
+  margin: 8px 0 0;
+  line-height: 26px;
+  color: var(--muted);
+}
+.page-cta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-block: 32px 80px;
+}
+.photo-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+  padding-block: 16px 56px;
+}
+.container > .photo {
+  margin-top: 8px;
+}
+
+/* Acabados */
+.grid--finish-cards {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 32px;
+  padding-block: 32px 80px;
+}
+.grid--finish-cards .text-card {
+  margin-top: 10px;
+}
+.grid--finish-cards .text-card h2 {
+  font-size: 22px;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+.finish-stones {
+  font-size: 13px;
+}
+.grid--finish-cards li:target .text-card {
+  border-top-color: var(--color-accent-700);
+}
+
+/* Detalle de proyecto */
+.project-hero {
+  margin-top: 16px;
+}
+.project-head {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: clamp(28px, 4vw, 56px);
+  align-items: start;
+  padding-block: clamp(32px, 5vw, 48px);
+}
+.project-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+  padding-block: 40px;
+}
+.testimonial {
+  margin: 0;
+  padding-block: 48px;
+  max-width: 62ch;
+}
+.testimonial blockquote {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: clamp(22px, 2.6vw, 32px);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+.testimonial figcaption {
+  margin-top: 12px;
+  color: var(--muted);
+}
+.project-back {
+  padding-block: 8px 80px;
+  margin: 0;
+}
+
+/* Contacto */
+.contact {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: clamp(28px, 4vw, 56px);
+  align-items: start;
+  padding-block: 40px 88px;
+}
+.contact .label {
+  margin-top: 0;
+}
+.map-placeholder {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Ficha de piedra: Ficha (por defecto) y Editorial, solo con CSS. */
+.stone-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.stone-view__switch {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+}
+.stone {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'head' 'gallery' 'body';
+  gap: 28px;
+  padding-block: 20px 72px;
+  align-items: start;
+}
+.stone__head {
+  grid-area: head;
+}
+.stone__gallery {
+  grid-area: gallery;
+}
+.stone__body {
+  grid-area: body;
+}
+.stone h1 {
+  margin-top: 12px;
+}
+.stone__desc {
+  margin-top: 0;
+}
+@media (min-width: 960px) {
+  .stone {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: 'gallery head' 'gallery body';
+    grid-template-rows: auto 1fr;
+    column-gap: clamp(28px, 4vw, 56px);
+    row-gap: 0;
+  }
+  .stone__body {
+    padding-top: 20px;
+  }
+  .stone-view:has(#layout-editorial:checked) .stone {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'head' 'gallery' 'body';
+    grid-template-rows: auto;
+    row-gap: 32px;
+  }
+  .stone-view:has(#layout-editorial:checked) .stone__body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(28px, 4vw, 56px);
+    padding-top: 0;
+  }
+  .stone-view:has(#layout-editorial:checked) .stone__desc {
+    font-size: 20px;
+    line-height: 32px;
+  }
+}
+.stone-view:has(#layout-editorial:checked) .stone h1 {
+  font-size: clamp(44px, 9vw, 140px);
+  line-height: 0.94;
+  letter-spacing: -0.03em;
+}
+.stone-view:has(#layout-editorial:checked) .stone__gallery > .photo {
+  aspect-ratio: auto !important;
+  height: min(62vh, 560px);
+}
+.stone-view:has(#layout-editorial:checked) .thumbs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}

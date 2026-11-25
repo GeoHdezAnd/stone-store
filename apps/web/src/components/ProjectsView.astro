@@ -1,0 +1,50 @@
+---
+import type { Project } from '@canteras/shared';
+import { PROJECT_CATEGORIES, PROJECT_CATEGORY_LABELS, type ProjectCategory } from '../lib/project';
+import ProjectCard from './ProjectCard.astro';
+
+interface Props {
+  projects: readonly Project[];
+  /** Categoría activa; `null` = todo. */
+  category: ProjectCategory | null;
+}
+
+const { projects, category } = Astro.props;
+---
+
+<nav aria-label="Filtrar por tipo de obra">
+  <ul class="filter-list">
+    <li>
+      <a
+        class="tag tag-outline"
+        href="/projects/"
+        aria-current={category === null ? 'page' : undefined}
+      >
+        Todo
+      </a>
+    </li>
+    {PROJECT_CATEGORIES.map((c) => (
+      <li>
+        <a
+          class="tag tag-outline"
+          href={`/projects/category/${c}/`}
+          aria-current={category === c ? 'page' : undefined}
+        >
+          {PROJECT_CATEGORY_LABELS[c]}
+        </a>
+      </li>
+    ))}
+  </ul>
+</nav>
+<hr class="rule filter-rule" />
+{projects.length === 0 ? (
+  <p class="empty muted">No hay proyectos publicados en esta categoría por ahora.</p>
+) : (
+  <ul class="grid grid--projects grid--projects-page">
+    {projects.map((p) => (
+      <li>
+        <ProjectCard project={p} />
+      </li>
+    ))}
+  </ul>
+)}

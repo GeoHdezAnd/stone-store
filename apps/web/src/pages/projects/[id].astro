@@ -1,0 +1,140 @@
+---
+import JsonLd from '../../components/JsonLd.astro';
+import Photo from '../../components/Photo.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { loadCatalog } from '../../lib/catalog-loader';
+import { joinList } from '../../lib/format';
+import { PROJECT_CATEGORY_LABELS } from '../../lib/project';
+
+export async function getStaticPaths() {
+  const { catalog } = await loadCatalog();
+  return catalog.projects.map((project) => ({ params: { id: project.id }, props: { project } }));
+}
+
+const { project } = Astro.props;
+const { catalog } = await loadCatalog();
+const stones = catalog.stones.filter((s) => project.piedras.includes(s.id));
+const finishes = catalog.finishes.filter((f) => project.acabados.includes(f.id));
+const [main, ...rest] = project.fotos;
+const category = PROJECT_CATEGORY_LABELS[project.categoria];
+
+const specs: [string, string | null][] = [
+  ['Ubicación', project.ubicacion],
+  ['Superficie', project.superficie || null],
+  ['Piezas labradas', project.piezasLabradas === null ? null : String(project.piezasLabradas)],
+  ['Entrega', project.entrega || null],
+];
+const breadcrumbs = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    {
+      '@type': 'ListItem',
+      position: 1,
+      name: 'Proyectos',
+      item: new URL('/projects/', Astro.site ?? Astro.url).href,
+    },
+    { '@type': 'ListItem', position: 2, name: project.titulo },
+  ],
+};
+---
+
+<BaseLayout
+  title={project.titulo}
+  description={project.descripcion.slice(0, 150) || `${category} en ${project.ubicacion}.`}
+  ogImage={main}
+  ogType="article"
+>
+  <JsonLd slot="head" data={breadcrumbs} />
+  <main id="contenido">
+    <div class="container">
+      <p class="crumbs">
+        <a href="/projects/">Proyectos</a> / {project.titulo}
+      </p>
+    </div>
+    <div class="project-hero">
+      <Photo photoKey={main} alt={`Foto de ${project.titulo}`} ratio="16 / 7" sizes="100vw" eager />
+    </div>
+    <div class="container">
+      <section class="project-head">
+        <div>
+          <span class="eyebrow">
+            {category} · {project.ubicacion} · {project.anio}
+          </span>
+          <h1 class="page-title">{project.titulo}</h1>
+          {project.descripcion && <p class="lead">{project.descripcion}</p>}
+        </div>
+        <div>
+          <table class="table specs">
+            <tbody>
+              {specs.map(
+                ([k, v]) =>
+                  v && (
+                    <tr>
+                      <th scope="row">{k}</th>
+                      <td>{v}</td>
+                    </tr>
+                  ),
+              )}
+              {stones.length > 0 && (
+                <tr>
+                  <th scope="row">Piedras</th>
+                  <td>
+                    {stones.map((s, i) => (
+                      <>
+                        {i > 0 && ', '}
+                        <a href={`/stones/${s.id}/`}>{s.nombre}</a>
+                      </>
+                    ))}
+                  </td>
+                </tr>
+              )}
+              {finishes.length > 0 && (
+                <tr>
+                  <th scope="row">Acabados</th>
+                  <td>
+                    <a href="/finishes/">{joinList(finishes.map((f) => f.nombre))}</a>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div class="btn-row">
+            <a class="btn btn-ghost" href="/quote/">
+              Quiero algo así
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {rest.length > 0 && (
+        <>
+          <hr class="rule" />
+          <section class="project-gallery" aria-label="Más fotos de la obra">
+            {rest.map((key, i) => (
+              <Photo
+                photoKey={key}
+                alt={`${project.titulo}, foto ${i + 2}`}
+                ratio="3 / 4"
+                sizes="(min-width: 960px) 33vw, 100vw"
+              />
+            ))}
+          </section>
+        </>
+      )}
+
+      {project.testimonio && (
+        <>
+          <hr class="rule" />
+          <figure class="testimonial">
+            <blockquote>“{project.testimonio.texto}”</blockquote>
+            <figcaption>— {project.testimonio.autor}</figcaption>
+          </figure>
+        </>
+      )}
+      <p class="project-back">
+        <a href="/projects/">← Todos los proyectos</a>
+      </p>
+    </div>
+  </main>
+</BaseLayout>

@@ -1,0 +1,32 @@
+---
+import ProjectsView from '../../../components/ProjectsView.astro';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { loadCatalog } from '../../../lib/catalog-loader';
+import {
+  PROJECT_CATEGORIES,
+  PROJECT_CATEGORY_LABELS,
+  type ProjectCategory,
+} from '../../../lib/project';
+
+export function getStaticPaths() {
+  return PROJECT_CATEGORIES.map((category) => ({ params: { category } }));
+}
+
+const category = Astro.params.category as ProjectCategory;
+const { catalog } = await loadCatalog();
+const projects = catalog.projects.filter((p) => p.categoria === category);
+const label = PROJECT_CATEGORY_LABELS[category];
+---
+
+<BaseLayout
+  title={`${label} | Proyectos`}
+  description={`Proyectos de ${label.toLowerCase()} hechos con nuestra piedra.`}
+>
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">Proyectos</span>
+      <h1 class="page-title">{label}</h1>
+    </section>
+    <ProjectsView projects={projects} category={category} />
+  </main>
+</BaseLayout>

@@ -1,8 +1,24 @@
 ---
-import UnderConstruction from '../components/UnderConstruction.astro';
+import ProjectsView from '../components/ProjectsView.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { loadCatalog } from '../lib/catalog-loader';
+
+const { catalog } = await loadCatalog();
 ---
 
-<BaseLayout title="Proyectos">
-  <UnderConstruction eyebrow="Proyectos" title="Obras hechas con nuestra piedra" />
+<BaseLayout
+  title="Proyectos"
+  description="Casas, cocinas, fachadas y restauraciones hechas con nuestra piedra, con la piedra y el acabado de cada obra."
+>
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">Proyectos</span>
+      <h1 class="page-title">Obras hechas con nuestra piedra</h1>
+      <p class="lead">
+        Casas, cocinas, fachadas y restauraciones. Cada obra indica la piedra y el acabado, para que
+        puedas pedir lo mismo.
+      </p>
+    </section>
+    <ProjectsView projects={catalog.projects} category={null} />
+  </main>
 </BaseLayout>

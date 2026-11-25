@@ -1,0 +1,21 @@
+---
+import type { Project } from '@canteras/shared';
+import { PROJECT_CATEGORY_LABELS } from '../lib/project';
+import Photo from './Photo.astro';
+
+interface Props {
+  project: Project;
+}
+
+const { project } = Astro.props;
+---
+
+<a class="tile" href={`/projects/${project.id}/`}>
+  <Photo photoKey={project.fotos[0]} ratio="4 / 3" sizes="(min-width: 960px) 33vw, 100vw" />
+  <span class="text-card">
+    <h3>{project.titulo}</h3>
+    <p>
+      {PROJECT_CATEGORY_LABELS[project.categoria]} · {project.ubicacion} · {project.anio}
+    </p>
+  </span>
+</a>

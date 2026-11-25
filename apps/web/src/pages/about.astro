@@ -1,8 +1,71 @@
 ---
-import UnderConstruction from '../components/UnderConstruction.astro';
+import Photo from '../components/Photo.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { loadCatalog } from '../lib/catalog-loader';
+
+const { catalog } = await loadCatalog();
+
+// TEXTO DE EJEMPLO: la historia real de la cantera la define el dueño (CLAUDE.md, sección 12).
+const steps = [
+  {
+    title: 'Extracción',
+    text: 'Sacamos el bloque por vetas, no por revoltura. Así el color de una fachada completa sale del mismo banco y no brinca entre hiladas.',
+  },
+  {
+    title: 'Corte y labrado',
+    text: 'Placa y losa a máquina; balaustres, molduras, fuentes y esculturas a mano, con cincel. Trabajamos sobre plantilla tomada en obra.',
+  },
+  {
+    title: 'Entrega numerada',
+    text: 'La piedra sale marcada por hilada y por posición, con flete a Puebla, Tlaxcala, Veracruz y Ciudad de México.',
+  },
+];
 ---
 
-<BaseLayout title="La cantera">
-  <UnderConstruction eyebrow="La cantera" title="Quiénes somos" />
+<BaseLayout
+  title="La cantera"
+  description="Del banco al patio y del patio a tu obra: cómo extraemos, labramos y entregamos la piedra."
+>
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">La cantera</span>
+      <h1 class="page-title">Del banco al patio, y del patio a tu obra</h1>
+      <p class="lead">
+        Somos una familia de canteros de San Salvador el Seco, Puebla. Extraemos, labramos en el
+        taller del patio y entregamos directo, sin intermediarios.
+      </p>
+      <p class="notice notice--example" role="note">
+        <strong>Texto de ejemplo.</strong> Canteras Naturales es un negocio ficticio; esta historia
+        es provisional hasta que el dueño dé la real.
+      </p>
+    </section>
+    <Photo alt="El banco de cantera" ratio="16 / 7" sizes="100vw" />
+    <ol class="rows">
+      {steps.map((s, i) => (
+        <li class="rows__item">
+          <span class="rows__num" aria-hidden="true">
+            {String(i + 1).padStart(2, '0')}
+          </span>
+          <div>
+            <h2>{s.title}</h2>
+            <p>{s.text}</p>
+          </div>
+        </li>
+      ))}
+    </ol>
+    <section class="photo-row" aria-label="Fotos del taller">
+      <Photo alt="El taller" ratio="4 / 3" sizes="(min-width: 960px) 33vw, 100vw" />
+      <Photo alt="Cantero labrando" ratio="4 / 3" sizes="(min-width: 960px) 33vw, 100vw" />
+      <Photo alt="Carga y flete" ratio="4 / 3" sizes="(min-width: 960px) 33vw, 100vw" />
+    </section>
+    <hr class="rule" />
+    <div class="page-cta">
+      <a class="btn btn-primary" href="/quote/?motivo=visita">
+        Agendar visita al patio
+      </a>
+      <a class="btn btn-ghost" href="/contact/">
+        Cómo llegar ({catalog.settings.horario})
+      </a>
+    </div>
+  </main>
 </BaseLayout>

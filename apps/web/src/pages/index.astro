@@ -109,7 +109,7 @@ const stats = [
             <ul class="grid grid--finishes">
               {finishes.map((f) => (
                 <li>
-                  <a class="tile" href="/finishes/">
+                  <a class="tile" href={`/finishes/#${f.id}`}>
                     <Photo photoKey={f.foto} ratio="1" sizes="150px" />
                     <span class="tile__row">
                       <span class="tile__sub">{f.nombre}</span>
@@ -135,7 +135,7 @@ const stats = [
             <ul class="grid grid--projects">
               {projects.map((p) => (
                 <li>
-                  <a class="tile" href="/projects/">
+                  <a class="tile" href={`/projects/${p.id}/`}>
                     <Photo
                       photoKey={p.fotos[0]}
                       ratio="16 / 10"

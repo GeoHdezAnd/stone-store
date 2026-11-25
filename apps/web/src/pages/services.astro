@@ -1,8 +1,50 @@
 ---
-import UnderConstruction from '../components/UnderConstruction.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { loadCatalog } from '../lib/catalog-loader';
+
+const { catalog } = await loadCatalog();
+const { services } = catalog;
 ---
 
-<BaseLayout title="Servicios">
-  <UnderConstruction eyebrow="Servicios" title="Qué hacemos" />
+<BaseLayout
+  title="Servicios"
+  description="Piedra en bruto, cocinas y fachadas, piezas labradas, corte a medida y entrega a obra."
+>
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">Servicios</span>
+      <h1 class="page-title">Lo que hacemos con la piedra</h1>
+      <p class="lead">
+        Vendemos material por metro cuadrado y también entregamos la pieza terminada. Si traes
+        medidas, tomamos plantilla en obra y te entregamos listo para instalar.
+      </p>
+    </section>
+    <hr class="rule" />
+    {services.length === 0 ? (
+      <p class="empty muted">Los servicios se publicarán pronto.</p>
+    ) : (
+      <ol class="rows">
+        {services.map((s, i) => (
+          <li class="rows__item" id={s.id}>
+            <span class="rows__num" aria-hidden="true">
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <div>
+              <h2>{s.titulo}</h2>
+              <p>{s.descripcion}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    )}
+    <hr class="rule" />
+    <div class="page-cta">
+      <a class="btn btn-primary" href="/quote/">
+        Pedir cotización
+      </a>
+      <a class="btn btn-ghost" href="/catalog/">
+        Ver el catálogo
+      </a>
+    </div>
+  </main>
 </BaseLayout>

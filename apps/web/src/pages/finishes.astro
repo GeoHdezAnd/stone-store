@@ -1,8 +1,59 @@
 ---
-import UnderConstruction from '../components/UnderConstruction.astro';
+import Photo from '../components/Photo.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { loadCatalog } from '../lib/catalog-loader';
+
+const { catalog } = await loadCatalog();
+const { finishes, stones } = catalog;
+
+// Piedras que ofrecen cada acabado (las piedras guardan el nombre del acabado, no el id).
+const normalize = (t: string) => t.trim().toLocaleLowerCase('es-MX');
+const stonesFor = (nombre: string) =>
+  stones.filter((s) => s.acabados.some((a) => normalize(a) === normalize(nombre)));
 ---
 
-<BaseLayout title="Acabados">
-  <UnderConstruction eyebrow="Acabados" title="Cómo labramos la piedra" />
+<BaseLayout
+  title="Acabados"
+  description="Cómo se labra la cara de la piedra: corte de sierra, apomazado, cincelado, martelinado y más."
+>
+  <main id="contenido" class="container">
+    <section class="page-head">
+      <span class="eyebrow">Acabados</span>
+      <h1 class="page-title">Cómo se labra la cara</h1>
+      <p class="lead">
+        El acabado decide el color, el brillo y qué tan resbalosa queda la piedra. Cada piedra
+        admite los que se indican en su ficha; pídenos una muestra del que te interese.
+      </p>
+    </section>
+    <hr class="rule" />
+    {finishes.length === 0 ? (
+      <p class="empty muted">Los acabados se publicarán pronto.</p>
+    ) : (
+      <ul class="grid grid--finish-cards">
+        {finishes.map((f) => {
+          const available = stonesFor(f.nombre);
+          return (
+            <li id={f.id}>
+              <Photo photoKey={f.foto} ratio="1" sizes="(min-width: 960px) 25vw, 50vw" />
+              <div class="text-card">
+                <h2>{f.nombre}</h2>
+                <p>{f.descripcion}</p>
+                {available.length > 0 && (
+                  <p class="finish-stones">
+                    Disponible en:{' '}
+                    {available.map((s, i) => (
+                      <>
+                        {i > 0 && ', '}
+                        <a href={`/stones/${s.id}/`}>{s.nombre}</a>
+                      </>
+                    ))}
+                  </p>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+  </main>
 </BaseLayout>
