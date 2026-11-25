@@ -5,7 +5,16 @@ import { AuthStack } from '../lib/auth-stack.js';
 import { CiStack } from '../lib/ci-stack.js';
 import { resolveEnv } from '../lib/config.js';
 import { DataStack } from '../lib/data-stack.js';
-import { MediaStack } from '../lib/media-stack.js';
+import {
+  MediaStack,
+  RESERVED_CONCURRENCY_CONTEXT,
+  parseReservedConcurrency,
+} from '../lib/media-stack.js';
+import {
+  ALERT_EMAIL_ENV,
+  ObservabilityStack,
+  parseAlertEmail,
+} from '../lib/observability-stack.js';
 import { PublishStack } from '../lib/publish-stack.js';
 import { validateAllowedOrigins } from '../lib/origins.js';
 import { SiteStack } from '../lib/site-stack.js';
@@ -54,10 +63,23 @@ const adminBaseUrl = (process.env['ADMIN_BASE_URL'] ?? '').trim();
 const turnstileSecretParam = (process.env['TURNSTILE_SECRET_PARAM'] ?? '').trim();
 
 // Fotos del catálogo: bucket privado al que el dashboard sube con URL prefirmada.
+// Variantes de imagen (fase 6.3): la Lambda `MediaVariants` vive en este stack. El binario nativo de
+// sharp se empaqueta SOLO con `-c packSharp=true` (necesita red; OBLIGATORIO fuera del emulador). Para
+// `cdk synth`/`diff` sin red existe `-c skipSharpCheck=true` (NO usar para desplegar). La concurrencia
+// reservada es opcional: `-c mediaVariantsReservedConcurrency=<n>` (ver `media-stack.ts`).
+const flag = (v: unknown): boolean => v === true || v === 'true' || v === '1';
+const packSharp = flag(app.node.tryGetContext('packSharp'));
+const skipSharpCheck = flag(app.node.tryGetContext('skipSharpCheck'));
+const reservedConcurrency = parseReservedConcurrency(
+  app.node.tryGetContext(RESERVED_CONCURRENCY_CONTEXT),
+);
 const media = new MediaStack(app, `canteras-media-${deploy.name}`, {
   env,
   deploy,
   allowedOrigins,
+  packSharp,
+  skipSharpCheck,
+  ...(reservedConcurrency === undefined ? {} : { reservedConcurrency }),
 });
 
 // Catálogo publicado (`catalog.json`): bucket privado y versionado, distinto del del sitio.
@@ -83,7 +105,7 @@ const sesRecipientIdentityArns = (process.env['SES_RECIPIENT_IDENTITY_ARNS'] ?? 
   .map((a) => a.trim())
   .filter((a) => a !== '');
 
-new ApiStack(app, `canteras-api-${deploy.name}`, {
+const api = new ApiStack(app, `canteras-api-${deploy.name}`, {
   env,
   deploy,
   ...(sesIdentityArn === '' ? {} : { sesIdentityArn }),
@@ -113,6 +135,27 @@ new ApiStack(app, `canteras-api-${deploy.name}`, {
   },
   allowedOrigins,
 });
+
+// Alarmas y presupuestos (apilado DESPUÉS de Api). Correo de alertas en ALERT_EMAIL (se valida; nunca
+// va en el repo). Fuera del emulador es obligatorio, pero para que `cdk synth` de los demás stacks no
+// lo exija, sin él este stack simplemente no se instancia (aviso por stderr). Para desplegarlo:
+// `ALERT_EMAIL=correo@dominio.com npx cdk deploy canteras-observability-dev`.
+const alertEmail = parseAlertEmail(process.env[ALERT_EMAIL_ENV]);
+if (alertEmail !== undefined || deploy.emulated) {
+  new ObservabilityStack(app, `canteras-observability-${deploy.name}`, {
+    env,
+    deploy,
+    httpApi: api.httpApi,
+    // MediaVariants viene de MediaStack (Media -> Observability): Media no depende de Api.
+    functions: { ...api.observedFunctions, MediaVariants: media.variantsFunction },
+    quotesCreateLogGroup: api.quotesCreateLogGroup,
+    ...(alertEmail === undefined ? {} : { alertEmail }),
+  });
+} else {
+  console.error(
+    `canteras-observability-${deploy.name} omitido: define ${ALERT_EMAIL_ENV} para incluirlo.`,
+  );
+}
 
 // Identidad de CI/CD (OIDC de GitHub). Los IDs numéricos salen de `gh api repos/<dueño>/<repo>`.
 // AWS permite un solo proveedor OIDC de GitHub por cuenta: si más adelante hay un CiStack de
