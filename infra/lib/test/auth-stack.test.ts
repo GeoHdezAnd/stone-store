@@ -55,8 +55,20 @@ describe('AuthStack: User Pool', () => {
     });
   });
 
-  it('MFA opcional con TOTP y sin SMS', () => {
-    const t = synth('dev');
+  it('en AWS real el MFA es obligatorio con TOTP y sin SMS (dev y prod)', () => {
+    for (const name of ['dev', 'prod'] as const) {
+      const t = synth(name, false);
+      t.hasResourceProperties('AWS::Cognito::UserPool', {
+        MfaConfiguration: 'ON',
+        EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
+      });
+      const pool = Object.values(t.findResources('AWS::Cognito::UserPool'))[0]!;
+      expect(JSON.stringify(pool.Properties)).not.toContain('SMS_MFA');
+    }
+  });
+
+  it('con emulador el MFA es opcional (TOTP, sin SMS) para que sigan los scripts de desarrollo', () => {
+    const t = synth('dev', true);
     t.hasResourceProperties('AWS::Cognito::UserPool', {
       MfaConfiguration: 'OPTIONAL',
       EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
@@ -123,6 +135,18 @@ describe('AuthStack: cliente de la SPA', () => {
   it('con emulador habilita USER_PASSWORD_AUTH para pruebas con curl', () => {
     synth('dev', true).hasResourceProperties('AWS::Cognito::UserPoolClient', {
       ExplicitAuthFlows: Match.arrayWith(['ALLOW_USER_PASSWORD_AUTH', 'ALLOW_USER_SRP_AUTH']),
+    });
+  });
+
+  it('el reto de MFA dura 15 minutos (el máximo) en AWS real y con emulador', () => {
+    // El default de Cognito son 3 min: se vence mientras el dueño instala la app autenticadora.
+    for (const emulated of [false, true]) {
+      synth('dev', emulated).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        AuthSessionValidity: 15,
+      });
+    }
+    synth('prod', false).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      AuthSessionValidity: 15,
     });
   });
 

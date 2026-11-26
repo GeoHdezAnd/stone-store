@@ -20,8 +20,9 @@ export interface AuthStackProps extends StackProps {
  * Autenticación del dashboard con Amazon Cognito (User Pool: directorio de usuarios con
  * login, contraseñas y MFA administrado por AWS; ~gratis hasta 10,000 usuarios activos al mes).
  *
- * Seguridad (CLAUDE.md 10): sin auto-registro, contraseña de 12+ caracteres, MFA TOTP opcional
- * (pasa a obligatorio para `owner` cuando el SPA tenga el flujo de alta de TOTP), sesiones cortas.
+ * Seguridad (CLAUDE.md 10): sin auto-registro, contraseña de 12+ caracteres, MFA TOTP obligatorio
+ * en AWS real para TODOS los roles (Cognito no permite exigirlo por grupo) y opcional solo en el
+ * emulador, para que los scripts de desarrollo y los `curl` sigan funcionando; sesiones cortas.
  */
 export class AuthStack extends Stack {
   public readonly userPool: UserPool;
@@ -52,7 +53,8 @@ export class AuthStack extends Stack {
       },
       // Sin SMS: cuesta dinero y es el factor más débil.
       accountRecovery: AccountRecovery.EMAIL_ONLY,
-      mfa: Mfa.OPTIONAL,
+      // Solo TOTP: sin SMS. En el emulador queda opcional (dev-token.ts no puede dar un código).
+      mfa: deploy.emulated ? Mfa.OPTIONAL : Mfa.REQUIRED,
       mfaSecondFactor: { otp: true, sms: false },
       // dev se borra con el stack; prod se conserva y no se puede borrar por accidente.
       removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
@@ -80,6 +82,9 @@ export class AuthStack extends Stack {
       accessTokenValidity: Duration.hours(1),
       idTokenValidity: Duration.hours(1),
       refreshTokenValidity: Duration.hours(8),
+      // Vigencia del reto de login (MFA_SETUP / SOFTWARE_TOKEN_MFA): el default son 3 min y se
+      // vence mientras se instala la app autenticadora. 15 min es el máximo permitido.
+      authSessionValidity: Duration.minutes(15),
     });
 
     // Los nombres de grupo son EXACTAMENTE los valores de ROLES (sin espacios): la

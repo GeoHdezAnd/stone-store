@@ -5,9 +5,9 @@ import {
   type CognitoUserSession,
 } from 'amazon-cognito-identity-js';
 import { parseGroupsClaim } from '@canteras/shared';
-import { AuthError, mapCognitoError } from './errors';
+import { AuthError, mapChallengeError, mapCognitoError } from './errors';
 import { rolesFromClaim } from './roles';
-import type { AuthService, AuthState, AuthUser } from './types';
+import type { AuthService, AuthState, AuthUser, SignInResult, TotpSetupData } from './types';
 
 export interface AuthConfig {
   userPoolId: string;
@@ -21,6 +21,12 @@ export interface AuthConfig {
 const REFRESH_MARGIN_SECONDS = 60;
 /** Tope de espera de `globalSignOut`: el cierre local no debe depender de la red. */
 const GLOBAL_SIGN_OUT_TIMEOUT_MS = 5000;
+
+/** Nombre que se muestra en la app autenticadora (el emisor del código). */
+const TOTP_ISSUER = 'Canteras Naturales';
+/** Nombre amigable del dispositivo que Cognito guarda al registrar el TOTP. */
+const TOTP_DEVICE_NAME = 'Aplicación autenticadora';
+const TOTP_CODE = /^\d{6}$/;
 
 const SIGNED_OUT: AuthState = { status: 'signed-out' };
 
@@ -64,6 +70,13 @@ export function createAuthService(config: AuthConfig): AuthService {
   let state: AuthState = { status: 'loading' };
   const listeners = new Set<() => void>();
 
+  // Reto de verificación pendiente. La instancia `CognitoUser` se conserva entre pasos porque
+  // guarda la `Session` del reto. Solo vive en memoria: se descarta al terminar o cancelar.
+  let pending: { user: CognitoUser; step: 'mfa-setup' | 'totp-required'; email: string } | null =
+    null;
+  // Alta de TOTP en curso: dos llamadas simultáneas comparten la misma clave.
+  let inflightSetup: Promise<TotpSetupData> | null = null;
+
   function setState(next: AuthState): void {
     if (
       state.status === next.status &&
@@ -72,6 +85,7 @@ export function createAuthService(config: AuthConfig): AuthService {
     ) {
       return;
     }
+    if (next.status === 'signed-in') pending = null;
     state = next;
     listeners.forEach((l) => l());
   }
@@ -204,24 +218,101 @@ export function createAuthService(config: AuthConfig): AuthService {
 
     currentUser: () => (state.status === 'signed-in' ? state.user : null),
 
-    async signIn(email, password) {
+    async signIn(email, password): Promise<SignInResult> {
       const username = email.trim().toLowerCase();
       const user = new CognitoUser({ Username: username, Pool: pool });
       const details = new AuthenticationDetails({ Username: username, Password: password });
+      pending = null;
+      inflightSetup = null;
+      const outcome = await new Promise<CognitoUserSession | 'mfa-setup' | 'totp-required'>(
+        (resolve, reject) => {
+          const unsupported = () => reject(new AuthError('unsupported_challenge'));
+          user.authenticateUser(details, {
+            onSuccess: resolve,
+            onFailure: (err: unknown) => reject(mapCognitoError(err)),
+            newPasswordRequired: unsupported,
+            mfaRequired: unsupported,
+            totpRequired: () => resolve('totp-required'),
+            mfaSetup: () => resolve('mfa-setup'),
+            selectMFAType: unsupported,
+            customChallenge: unsupported,
+          });
+        },
+      );
+      if (typeof outcome === 'string') {
+        pending = { user, step: outcome, email: username };
+        return { status: outcome };
+      }
+      setState({ status: 'signed-in', user: userFromSession(outcome) });
+      return { status: 'signed-in' };
+    },
+
+    startTotpSetup(): Promise<TotpSetupData> {
+      const current = pending;
+      if (current?.step !== 'mfa-setup') return Promise.reject(new AuthError('challenge_expired'));
+      // Single-flight: cada llamada a Cognito genera una clave nueva e invalida la anterior.
+      inflightSetup ??= new Promise<string>((resolve, reject) => {
+        current.user.associateSoftwareToken({
+          associateSecretCode: resolve,
+          onFailure: (err: unknown) => reject(mapChallengeError(err)),
+        });
+      })
+        .then((secret) => {
+          const label = `${encodeURIComponent(TOTP_ISSUER)}:${encodeURIComponent(current.email)}`;
+          const otpauthUri =
+            `otpauth://totp/${label}?secret=${encodeURIComponent(secret)}` +
+            `&issuer=${encodeURIComponent(TOTP_ISSUER)}`;
+          return { secret, otpauthUri };
+        })
+        .catch((err: unknown) => {
+          // Solo se descarta el reto si sigue siendo el mismo (pudo cancelarse o reemplazarse).
+          if (
+            pending === current &&
+            err instanceof AuthError &&
+            err.code !== 'network' &&
+            err.code !== 'unknown'
+          ) {
+            pending = null;
+          }
+          throw err;
+        })
+        .finally(() => {
+          inflightSetup = null;
+        });
+      return inflightSetup;
+    },
+
+    async confirmTotpSetup(code) {
+      const current = pending;
+      if (current?.step !== 'mfa-setup') throw new AuthError('challenge_expired');
+      if (!TOTP_CODE.test(code)) throw new AuthError('code_mismatch');
       const session = await new Promise<CognitoUserSession>((resolve, reject) => {
-        const unsupported = () => reject(new AuthError('unsupported_challenge'));
-        user.authenticateUser(details, {
+        current.user.verifySoftwareToken(code, TOTP_DEVICE_NAME, {
           onSuccess: resolve,
-          onFailure: (err: unknown) => reject(mapCognitoError(err)),
-          newPasswordRequired: unsupported,
-          mfaRequired: unsupported,
-          totpRequired: unsupported,
-          mfaSetup: unsupported,
-          selectMFAType: unsupported,
-          customChallenge: unsupported,
+          onFailure: (err: unknown) => reject(mapChallengeError(err)),
         });
       });
       setState({ status: 'signed-in', user: userFromSession(session) });
+    },
+
+    async submitTotp(code) {
+      const current = pending;
+      if (current?.step !== 'totp-required') throw new AuthError('challenge_expired');
+      if (!TOTP_CODE.test(code)) throw new AuthError('code_mismatch');
+      const session = await new Promise<CognitoUserSession>((resolve, reject) => {
+        // El tercer argumento es obligatorio: por defecto la librería manda `SMS_MFA`.
+        current.user.sendMFACode(
+          code,
+          { onSuccess: resolve, onFailure: (err: unknown) => reject(mapChallengeError(err)) },
+          'SOFTWARE_TOKEN_MFA',
+        );
+      });
+      setState({ status: 'signed-in', user: userFromSession(session) });
+    },
+
+    cancelChallenge() {
+      pending = null;
+      inflightSetup = null;
     },
 
     getAccessToken() {

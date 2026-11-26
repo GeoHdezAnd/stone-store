@@ -19,6 +19,7 @@
     "@canteras/shared": "0.0.0",
     "@canteras/ui": "0.0.0",
     "amazon-cognito-identity-js": "6.3.22",
+    "qrcode.react": "4.2.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-router-dom": "7.18.6",
