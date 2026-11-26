@@ -1,4 +1,4 @@
-import type { LostReason, QuoteStatus } from '@canteras/shared';
+import type { IvaPct, LostReason, QuoteStatus } from '@canteras/shared';
 
 export { formatMxn } from './freightLabels';
 export { formatDateTime } from './publishLabels';
@@ -36,6 +36,22 @@ export const LOST_REASON_LABELS: Record<LostReason, string> = {
 
 export const lostReasonLabel = (reason: string) =>
   LOST_REASON_LABELS[reason as LostReason] ?? reason;
+
+/** Opciones del selector de IVA («Sin IVA» = valor vacío = `null`). */
+export const IVA_CHOICES: readonly { value: string; label: string }[] = [
+  { value: '', label: 'Sin IVA' },
+  { value: '8', label: '8 %' },
+  { value: '16', label: '16 %' },
+];
+
+export const ivaPctToText = (pct: IvaPct | undefined): string => (pct == null ? '' : String(pct));
+export const parseIvaPct = (text: string): IvaPct => (text === '8' ? 8 : text === '16' ? 16 : null);
+export const ivaPctLabel = (pct: IvaPct | undefined): string =>
+  pct == null ? 'Sin IVA' : `${pct} %`;
+
+/** Aclaración del total: el IVA va solo sobre la piedra y el flete no lleva IVA. */
+export const totalNote = (pct: IvaPct | undefined): string =>
+  pct == null ? 'sin IVA' : `con IVA del ${pct} % sobre la piedra; el flete no lleva IVA`;
 
 /** Meta del sitio: responder en menos de 48 h (CLAUDE.md 5.1). */
 export const RESPONSE_GOAL_HOURS = 48;

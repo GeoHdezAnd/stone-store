@@ -403,8 +403,8 @@ export class ApiStack extends Stack {
       }),
     );
 
-    // Configuración del negocio (filas únicas PUBLIC y MAIL de Settings). Lectura con `GetItem`
-    // (sin Scan ni BatchGetItem: solo hay dos claves conocidas). La escritura es un `PutItem`
+    // Configuración del negocio (filas únicas PUBLIC, MAIL y QUOTING de Settings). Lectura con
+    // `GetItem` (sin Scan ni BatchGetItem: solo hay tres claves conocidas). La escritura es un `PutItem`
     // dentro de una transacción (fila + auditoría), igual que el catálogo; no hay Update, Delete
     // ni Query. Sin acceso a las tablas del catálogo ni a S3. Floci NO aplica IAM: verificar en
     // AWS real.
@@ -412,10 +412,16 @@ export class ApiStack extends Stack {
     this.adminSettingsFunction = adminSettings;
     adminSettings.addEnvironment('SETTINGS_TABLE', tables.settings.tableName);
     adminSettings.addEnvironment('AUDIT_TABLE', tables.auditLog.tableName);
-    // Defensa en profundidad: solo las filas PUBLIC y MAIL (igual que AdminPublish y AdminQuotes).
+    // Defensa en profundidad: solo las filas conocidas. AdminSettings es el ÚNICO rol que toca
+    // QUOTING (IVA por defecto): AdminPublish no la ve (no se publica) y AdminQuotes no la necesita
+    // (el IVA por defecto solo preselecciona el formulario del dashboard).
     const soloFilasDeSettings = {
       'ForAllValues:StringEquals': {
-        'dynamodb:LeadingKeys': [SETTINGS_ROW_KEYS.public, SETTINGS_ROW_KEYS.mail],
+        'dynamodb:LeadingKeys': [
+          SETTINGS_ROW_KEYS.public,
+          SETTINGS_ROW_KEYS.mail,
+          SETTINGS_ROW_KEYS.quoting,
+        ],
       },
     };
     adminSettings.addToRolePolicy(

@@ -115,7 +115,8 @@ export function MetricsScreen() {
 
           <p className="muted">
             Actualizado el {formatDateTime(state.data.generatedAt)}. Horario de Ciudad de México; el
-            mes y la semana se cuentan en ese huso. Importes en pesos, sin IVA.
+            mes y la semana se cuentan en ese huso. Importes en pesos: el total de cada cotización,
+            con IVA (si lo lleva) y flete.
           </p>
         </div>
       )}

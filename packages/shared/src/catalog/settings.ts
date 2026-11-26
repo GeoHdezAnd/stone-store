@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { ivaPctSchema } from '../quote/schema';
 import { text } from './common';
 
-// Valores de la clave de partición (`key`) de las dos filas únicas de la tabla Settings.
+// Valores de la clave de partición (`key`) de las filas únicas de la tabla Settings.
 // El seed y la API de administración deben usar los mismos.
-export const SETTINGS_ROW_KEYS = { public: 'PUBLIC', mail: 'MAIL' } as const;
+export const SETTINGS_ROW_KEYS = { public: 'PUBLIC', mail: 'MAIL', quoting: 'QUOTING' } as const;
 
 // Fila PUBLIC de Settings (CLAUDE.md 5.5 y 6.2).
 // Los valores reales (patio, WhatsApp, correo) los da el dueño; los del seed son DE EJEMPLO.
@@ -37,6 +38,8 @@ export const MAIL_TEMPLATE_VARIABLES = [
   'nombre',
   'folio',
   'piedras',
+  'subtotal',
+  'iva',
   'flete',
   'total',
   'vigencia',
@@ -77,6 +80,14 @@ export const mailSettingsSchema = z.strictObject({
   asuntoCotizacion: templateField(200, 'El asunto'),
 });
 export type MailSettings = z.infer<typeof mailSettingsSchema>;
+
+// Fila QUOTING de Settings: valores por defecto del formulario de cotización. Va en su propia fila
+// (no en PUBLIC, que se publica en catalog.json, ni en MAIL). El IVA por defecto SOLO preselecciona
+// el formulario del dashboard: el servidor nunca lo usa para calcular una cotización.
+export const quotingSettingsSchema = z.strictObject({
+  ivaPctDefault: ivaPctSchema,
+});
+export type QuotingSettings = z.infer<typeof quotingSettingsSchema>;
 
 const HTML_ESCAPES: Readonly<Record<string, string>> = {
   '&': '&amp;',

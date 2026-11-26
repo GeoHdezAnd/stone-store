@@ -141,6 +141,17 @@ describe('computeMetrics: cotizadas y ganadas del mes (por fecha del evento)', (
     ]);
     expect(m.cards.quoted).toEqual({ count: 1, value: 1000, withoutAmount: 0 });
   });
+  it('el valor suma finalQuote.total CON IVA y flete (no el subtotal de la piedra)', () => {
+    const conIva = { ...fq(1000), subtotal: 800, iva: 128, ivaPct: 16 as const, fleteFinal: 72 };
+    const m = run([
+      q({
+        status: 'cotizada',
+        finalQuote: conIva,
+        history: [ev('2026-11-10T16:00:00.000Z', 'cotizada')],
+      }),
+    ]);
+    expect(m.cards.quoted.value).toBe(1000);
+  });
   it('frontera de mes en el huso local: 05:59:59.999Z del día 1 es octubre, 06:00Z es noviembre', () => {
     const base = { status: 'cotizada' as const, finalQuote: fq(100) };
     const m = run([

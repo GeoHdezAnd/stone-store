@@ -1,9 +1,11 @@
 import {
   mailSettingsSchema,
   publicSettingsSchema,
+  quotingSettingsSchema,
   SETTINGS_ROW_KEYS,
   type MailSettings,
   type PublicSettings,
+  type QuotingSettings,
 } from '@canteras/shared';
 import type { ZodType } from 'zod';
 import { buildAuditEntry } from '../lib/audit';
@@ -22,6 +24,8 @@ export interface SettingsRouterOptions extends RouterOptions {
   /** Para pruebas: reloj de la auditoría. */
   now?: () => Date;
 }
+
+const DEFAULT_QUOTING_SETTINGS: QuotingSettings = { ivaPctDefault: null };
 
 /** Quita el atributo `key` (clave de la tabla) de una fila guardada. */
 function withoutKey(row: Record<string, unknown>): Record<string, unknown> {
@@ -52,9 +56,9 @@ export function createSettingsRoutes(
   repo: SettingsRepository,
   now: () => Date = () => new Date(),
 ): Route[] {
-  // Un PUT por fila: una sola implementación para las dos, parametrizada por clave y esquema.
+  // Un PUT por fila: una sola implementación para todas, parametrizada por clave y esquema.
   const putRoute = <T extends Record<string, unknown>>(
-    id: 'public' | 'mail',
+    id: 'public' | 'mail' | 'quoting',
     schema: ZodType<T>,
   ): Route =>
     route('PUT', `/admin/settings/${id}`, ['owner'], async (ctx) => {
@@ -76,7 +80,7 @@ export function createSettingsRoutes(
         after: data,
         at: now(),
         requestId: ctx.requestId,
-        // Solo la fila PUBLIC entra a catalog.json; la MAIL (plantillas) no se publica.
+        // Solo la fila PUBLIC entra a catalog.json; MAIL (plantillas) y QUOTING (IVA por defecto) no.
         ...(id === 'public' ? { scope: 'CATALOG' as const } : {}),
       });
       try {
@@ -92,14 +96,21 @@ export function createSettingsRoutes(
 
   return [
     route('GET', '/admin/settings', ['owner', 'staff'], async (ctx) => {
-      const [pub, mail] = await Promise.all([
+      const [pub, mail, quoting] = await Promise.all([
         readRow<PublicSettings>(repo, SETTINGS_ROW_KEYS.public, publicSettingsSchema, ctx),
         readRow<MailSettings>(repo, SETTINGS_ROW_KEYS.mail, mailSettingsSchema, ctx),
+        readRow<QuotingSettings>(repo, SETTINGS_ROW_KEYS.quoting, quotingSettingsSchema, ctx),
       ]);
-      return jsonResponse(200, { public: pub, mail });
+      // QUOTING ausente o inválida = valor por defecto (sin IVA): nunca tumba las otras filas.
+      return jsonResponse(200, {
+        public: pub,
+        mail,
+        quoting: quoting ?? DEFAULT_QUOTING_SETTINGS,
+      });
     }),
     putRoute('public', publicSettingsSchema),
     putRoute('mail', mailSettingsSchema),
+    putRoute('quoting', quotingSettingsSchema),
   ];
 }
 

@@ -112,9 +112,16 @@ describe('buildQuoteSeeds', () => {
           prices: fq.items,
           fleteFinal: fq.fleteFinal,
           vigenciaDias: fq.vigenciaDias,
+          ivaPct: fq.ivaPct,
         });
         expect(fq.total).toBe(again.total);
         expect(fq.subtotal).toBe(again.subtotal);
+        expect(fq.iva).toBe(again.iva);
+        // IVA solo sobre la piedra: piedra + IVA + flete = total (en centavos).
+        const cents = (n: number) => Math.round(n * 100);
+        expect(cents(fq.subtotal) + cents(fq.iva ?? 0) + cents(fq.fleteFinal)).toBe(
+          cents(fq.total),
+        );
         expect(fq.vigenciaDias).toBe(15);
       }
       if (['enviada', 'ganada', 'perdida'].includes(q.status)) {
@@ -124,6 +131,16 @@ describe('buildQuoteSeeds', () => {
       if (q.status === 'perdida') expect(q.lostReason).toBeDefined();
       if (q.status === 'nueva') expect(q.finalQuote).toBeUndefined();
     }
+  });
+
+  it('las cotizaciones de ejemplo mezclan sin IVA, 8 % y 16 %', () => {
+    const tasas = new Set(
+      rows
+        .map(domain)
+        .filter((q) => q.finalQuote)
+        .map((q) => q.finalQuote!.ivaPct),
+    );
+    expect(tasas).toEqual(new Set([null, 8, 16]));
   });
 
   it('el estimado de flete sale de estimateFreight con la tarifa de ejemplo t0001', () => {

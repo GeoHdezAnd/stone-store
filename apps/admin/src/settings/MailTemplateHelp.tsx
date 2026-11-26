@@ -7,6 +7,8 @@ const SAMPLE: Record<MailTemplateVariable, string> = {
   nombre: 'María Pérez (ejemplo)',
   folio: 'CN-2026-00042 (ejemplo)',
   piedras: 'Arenisca 210 m² (ejemplo)',
+  subtotal: '$100,000 MXN (ejemplo)',
+  iva: '$16,000 MXN (16 %) (ejemplo)',
   flete: '$8,000 MXN (ejemplo)',
   total: '$120,000 MXN (ejemplo)',
   vigencia: '15 días (ejemplo)',

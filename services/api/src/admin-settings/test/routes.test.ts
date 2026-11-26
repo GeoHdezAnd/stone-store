@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
 import { describe, expect, it } from 'vitest';
-import { mailSettings, publicSettings } from './fixtures';
+import { mailSettings, publicSettings, quotingSettings } from './fixtures';
 import { MemorySettingsRepository } from './memory-repository';
 import { ConflictError } from '../repository';
 import { createSettingsRouter } from '../routes';
@@ -54,6 +54,7 @@ function setup() {
 const PUT_ROUTES = [
   ['/admin/settings/public', publicSettings],
   ['/admin/settings/mail', mailSettings],
+  ['/admin/settings/quoting', quotingSettings],
 ] as const;
 
 describe('matriz de roles por ruta', () => {
@@ -110,6 +111,10 @@ describe('rutas y métodos no declarados', () => {
     ['PATCH', '/admin/settings'],
     ['GET', '/admin/settings/public'],
     ['GET', '/admin/settings/mail'],
+    ['GET', '/admin/settings/quoting'],
+    ['DELETE', '/admin/settings/quoting'],
+    ['POST', '/admin/settings/quoting'],
+    ['PUT', '/admin/settings/QUOTING'],
     ['POST', '/admin/settings/public'],
     ['DELETE', '/admin/settings/public'],
     ['DELETE', '/admin/settings/mail'],
@@ -126,11 +131,39 @@ describe('rutas y métodos no declarados', () => {
 });
 
 describe('GET /admin/settings', () => {
-  it('sin filas: ambos campos null', async () => {
+  it('sin filas: public y mail null; quoting con su valor por defecto (sin IVA)', async () => {
     const { call } = setup();
     const r = await call({ path: '/admin/settings' });
     expect(r.status).toBe(200);
-    expect(r.json).toEqual({ public: null, mail: null });
+    expect(r.json).toEqual({ public: null, mail: null, quoting: { ivaPctDefault: null } });
+  });
+
+  it('con fila QUOTING: la incluye (owner y staff la leen) sin `key`', async () => {
+    const { repo, call } = setup();
+    repo.seedRaw('QUOTING', { key: 'QUOTING', ...quotingSettings({ ivaPctDefault: 8 }) });
+    for (const groups of ['[owner]', '[staff]']) {
+      const r = await call({ path: '/admin/settings', groups });
+      expect(r.json.quoting).toEqual({ ivaPctDefault: 8 });
+      expect(r.text).not.toContain('"key"');
+    }
+  });
+
+  it('fila QUOTING inválida: se trata como el valor por defecto (null), con warn sin valores y sin tumbar PUBLIC/MAIL', async () => {
+    const { repo, lines, call } = setup();
+    repo.seedRaw('PUBLIC', { key: 'PUBLIC', ...publicSettings() });
+    repo.seedRaw('MAIL', { key: 'MAIL', ...mailSettings() });
+    repo.seedRaw('QUOTING', { key: 'QUOTING', ivaPctDefault: 7, secreto: 'VALOR-RARO' });
+    const r = await call({ path: '/admin/settings' });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({
+      public: publicSettings(),
+      mail: mailSettings(),
+      quoting: { ivaPctDefault: null },
+    });
+    const warns = lines.map((l) => JSON.parse(l)).filter((l) => l.msg === 'invalid_stored_item');
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toMatchObject({ key: 'QUOTING' });
+    expect(lines.join('\n')).not.toContain('VALOR-RARO');
   });
 
   it('con filas: devuelve los datos SIN el atributo `key`', async () => {
@@ -139,16 +172,24 @@ describe('GET /admin/settings', () => {
     repo.seedRaw('MAIL', { key: 'MAIL', ...mailSettings() });
     const r = await call({ path: '/admin/settings', groups: '[staff]' });
     expect(r.status).toBe(200);
-    expect(r.json).toEqual({ public: publicSettings(), mail: mailSettings() });
+    expect(r.json).toEqual({
+      public: publicSettings(),
+      mail: mailSettings(),
+      quoting: { ivaPctDefault: null },
+    });
     expect(r.text).not.toContain('"key"');
-    expect([...repo.calls].sort()).toEqual(['get:MAIL', 'get:PUBLIC']);
+    expect([...repo.calls].sort()).toEqual(['get:MAIL', 'get:PUBLIC', 'get:QUOTING']);
   });
 
   it('una fila ausente y otra presente: solo la ausente es null', async () => {
     const { repo, call } = setup();
     repo.seedRaw('MAIL', { key: 'MAIL', ...mailSettings() });
     const r = await call({ path: '/admin/settings' });
-    expect(r.json).toEqual({ public: null, mail: mailSettings() });
+    expect(r.json).toEqual({
+      public: null,
+      mail: mailSettings(),
+      quoting: { ivaPctDefault: null },
+    });
   });
 
   it('una fila inválida da null y un warn SIN valores guardados', async () => {
@@ -164,7 +205,11 @@ describe('GET /admin/settings', () => {
     repo.seedRaw('MAIL', { key: 'MAIL', ...mailSettings() });
     const r = await call({ path: '/admin/settings' });
     expect(r.status).toBe(200);
-    expect(r.json).toEqual({ public: null, mail: mailSettings() });
+    expect(r.json).toEqual({
+      public: null,
+      mail: mailSettings(),
+      quoting: { ivaPctDefault: null },
+    });
     const warns = lines.map((l) => JSON.parse(l)).filter((l) => l.msg === 'invalid_stored_item');
     expect(warns).toHaveLength(1);
     expect(warns[0]).toMatchObject({ level: 'warn', requestId: 'req-1', key: 'PUBLIC' });
@@ -178,7 +223,11 @@ describe('GET /admin/settings', () => {
   it('una fila con un atributo extra (fuera del esquema) se trata como inválida', async () => {
     const { repo, call } = setup();
     repo.seedRaw('MAIL', { key: 'MAIL', ...mailSettings(), interno: 'x' });
-    expect((await call({ path: '/admin/settings' })).json).toEqual({ public: null, mail: null });
+    expect((await call({ path: '/admin/settings' })).json).toEqual({
+      public: null,
+      mail: null,
+      quoting: { ivaPctDefault: null },
+    });
   });
 });
 
@@ -209,6 +258,12 @@ describe('PUT: validación (422 sin eco de lo enviado)', () => {
       mailSettings({ asuntoCotizacion: 'Texto-privado {{desconocida}}' }),
       'Texto-privado',
     ],
+    ['IVA 7 %', 'quoting', { ivaPctDefault: 7 }, '7'],
+    ['IVA 0', 'quoting', { ivaPctDefault: 0 }, '0'],
+    ['IVA 16.0001', 'quoting', { ivaPctDefault: 16.0001 }, '16.0001'],
+    ['IVA como texto', 'quoting', { ivaPctDefault: '16' }, 'ivaPctDefault":"16'],
+    ['IVA ausente', 'quoting', {}, 'zzz'],
+    ['clave extra en quoting', 'quoting', { ivaPctDefault: 16, claveExtra: 1 }, 'claveExtra'],
     [
       'llaves mal formadas',
       'mail',
@@ -342,6 +397,66 @@ describe('PUT: escritura', () => {
     const r = await call({ method: 'PUT', path: '/admin/settings/public', body: publicSettings() });
     expect(r.status).toBe(200);
     expect(repo.audits[0]).toMatchObject({ accion: 'update', antes: { whatsapp: 'basura' } });
+  });
+});
+
+describe('PUT /admin/settings/quoting', () => {
+  it.each([null, 8, 16])('owner guarda ivaPctDefault %s en la fila QUOTING', async (v) => {
+    const { repo, call } = setup();
+    const r = await call({
+      method: 'PUT',
+      path: '/admin/settings/quoting',
+      body: { ivaPctDefault: v },
+    });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ ivaPctDefault: v });
+    expect(repo.calls.filter((c) => c.startsWith('put'))).toEqual(['put:QUOTING']);
+    expect(await repo.get('QUOTING')).toEqual({ key: 'QUOTING', ivaPctDefault: v });
+    expect(await repo.get('PUBLIC')).toBeNull();
+  });
+
+  it('staff recibe 403 y no se escribe nada ni se audita', async () => {
+    const { repo, call } = setup();
+    const r = await call({
+      method: 'PUT',
+      path: '/admin/settings/quoting',
+      groups: '[staff]',
+      body: { ivaPctDefault: 16 },
+    });
+    expect(r.status).toBe(403);
+    expect(repo.calls).toEqual([]);
+    expect(repo.audits).toEqual([]);
+  });
+
+  it('audita con forma exacta y SIN scope CATALOG (no se publica)', async () => {
+    const { repo, call } = setup();
+    await call({ method: 'PUT', path: '/admin/settings/quoting', body: { ivaPctDefault: 16 } });
+    await call({ method: 'PUT', path: '/admin/settings/quoting', body: { ivaPctDefault: 8 } });
+    expect(repo.audits[0]).toEqual({
+      pk: 'ENTITY#settings#quoting',
+      sk: '2026-11-18T10:00:00.000Z#req-1',
+      userId: 'user-1',
+      accion: 'create',
+      antes: null,
+      despues: { ivaPctDefault: 16 },
+    });
+    expect(repo.audits[1]).toMatchObject({
+      accion: 'update',
+      antes: { ivaPctDefault: 16 },
+      despues: { ivaPctDefault: 8 },
+    });
+    expect(repo.audits[0]).not.toHaveProperty('scope');
+  });
+
+  it('`__proto__` como propiedad propia se rechaza (422)', async () => {
+    const { repo, call } = setup();
+    const r = await call({
+      method: 'PUT',
+      path: '/admin/settings/quoting',
+      rawBody: '{"__proto__":{"admin":true},"ivaPctDefault":16}',
+    });
+    expect(r.status).toBe(422);
+    expect(repo.audits).toEqual([]);
   });
 });
 

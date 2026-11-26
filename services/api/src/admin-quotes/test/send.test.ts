@@ -113,6 +113,7 @@ describe('POST /admin/quotes/{quoteId}/send', () => {
       subject: 'Tu cotización CN-2026-00001 de Canteras Naturales',
     });
     expect(mailer.sent[0]!.text).toContain('Total: $3,605.00 MXN (sin IVA)');
+    expect(mailer.sent[0]!.text).toContain('Precios sin IVA');
     // El correo sale ANTES de la escritura.
     expect(repo.calls.filter((c) => c === 'mail' || c === 'update')).toEqual([
       'update',
@@ -122,6 +123,48 @@ describe('POST /admin/quotes/{quoteId}/send', () => {
     expect(repo.rows.get(ID_A)!['gsi1pk']).toBe('STATUS#enviada');
     expect(repo.audits).toHaveLength(1); // solo la del envío (el reclamo no audita)
     expect(repo.audits[0]).toMatchObject({ accion: 'send', pk: `ENTITY#quote#${ID_A}` });
+  });
+
+  it('usa el finalQuote GUARDADO con su IVA: no recalcula (ni con la tasa por defecto ni con otra)', async () => {
+    const { repo, mailer, send } = setup();
+    // Importes guardados a propósito NO recalculables desde los renglones: si el envío recalculara,
+    // saldría otro total.
+    const base = quotedQuote({}, 8);
+    repo.seed(
+      quotedQuote({
+        finalQuote: { ...base.finalQuote!, subtotal: 5000, iva: 400, fleteFinal: 111, total: 5511 },
+      }),
+    );
+    // Aunque exista una fila QUOTING con otra tasa, el envío no la usa.
+    repo.settings.set('QUOTING', { key: 'QUOTING', ivaPctDefault: 16 });
+    const r = await send(ID_A);
+    expect(r.status).toBe(200);
+    expect(r.json.finalQuote).toMatchObject({
+      subtotal: 5000,
+      iva: 400,
+      ivaPct: 8,
+      fleteFinal: 111,
+      total: 5511,
+    });
+    const text = mailer.sent[0]!.text;
+    expect(text).toContain('Piedra: $5,000.00 MXN');
+    expect(text).toContain('IVA (8 %): $400.00 MXN');
+    expect(text).toContain('Flete (sin IVA): $111.00 MXN');
+    expect(text).toContain('Total: $5,511.00 MXN');
+    expect(repo.audits[0]!.despues).toMatchObject({
+      finalQuote: { iva: 400, ivaPct: 8, total: 5511 },
+    });
+  });
+
+  it('con IVA y una plantilla guardada antes del IVA: el correo igual trae el desglose', async () => {
+    const { repo, mailer, send } = setup();
+    repo.seed(quotedQuote({}, 16));
+    const r = await send(ID_A);
+    expect(r.status).toBe(200);
+    const text = mailer.sent[0]!.text;
+    expect(text).toContain('IVA (16 %): $336.80 MXN');
+    expect(text).toContain('Total: $3,941.80 MXN');
+    expect(text).not.toContain('(sin IVA)\n');
   });
 
   it('respondedAt solo se fija si no existía', async () => {

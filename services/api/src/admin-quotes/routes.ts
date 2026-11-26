@@ -158,6 +158,8 @@ function auditView(q: Quote) {
       : {
           finalQuote: {
             subtotal: q.finalQuote.subtotal,
+            iva: q.finalQuote.iva,
+            ivaPct: q.finalQuote.ivaPct,
             fleteFinal: q.finalQuote.fleteFinal,
             total: q.finalQuote.total,
             vigenciaDias: q.finalQuote.vigenciaDias,
@@ -356,6 +358,11 @@ export function createQuotesRoutes(deps: QuotesDeps): Route[] {
         const parsed = patchBodySchema.safeParse(ctx.body);
         if (!parsed.success) return validationErrorResponse(parsed.error);
         const body = parsed.data;
+        // La tasa de IVA es dinero: SOLO el owner la cambia. Si el staff manda `ivaPct` (aunque sea
+        // el mismo valor que ya tiene la cotización) se rechaza ANTES de leer o escribir nada.
+        if (body.finalQuote?.ivaPct !== undefined && !ctx.roles.includes('owner')) {
+          throw new HttpError(403, 'forbidden');
+        }
         const current = await load(ctx);
         const nowDate = now();
         // Un envío en curso bloquea toda edición (el correo se arma con lo guardado).
@@ -376,6 +383,12 @@ export function createQuotesRoutes(deps: QuotesDeps): Route[] {
         // Precios y flete: solo mientras la solicitud se prepara.
         if (body.finalQuote !== undefined) {
           if (!PRICING_STATUSES.includes(current.status)) throw new HttpError(409, 'quote_locked');
+          // Sin `ivaPct` en el cuerpo se CONSERVA la tasa ya guardada (así el staff puede re-guardar
+          // precios sin tocarla); en la primera cotización es `null` (sin IVA). El IVA por defecto
+          // de Settings solo preselecciona el formulario del dashboard: aquí nunca se lee.
+          const previousIvaPct = current.finalQuote?.ivaPct ?? null;
+          const ivaPct =
+            body.finalQuote.ivaPct === undefined ? previousIvaPct : body.finalQuote.ivaPct;
           let computed;
           try {
             computed = computeFinalQuote({
@@ -383,6 +396,7 @@ export function createQuotesRoutes(deps: QuotesDeps): Route[] {
               prices: body.finalQuote.items,
               fleteFinal: body.finalQuote.fleteFinal,
               vigenciaDias: body.finalQuote.vigenciaDias,
+              ivaPct,
             });
           } catch {
             return jsonResponse(422, {
@@ -396,11 +410,14 @@ export function createQuotesRoutes(deps: QuotesDeps): Route[] {
             });
           }
           next = { ...next, finalQuote: computed };
+          // Qué cambió: la tasa solo se menciona cuando cambia (sin datos personales).
+          const ivaChange =
+            ivaPct === previousIvaPct ? '' : ivaPct === null ? '. Sin IVA' : `. IVA ${ivaPct} %`;
           history.push({
             at,
             by: ctx.userId,
             tipo: 'edicion',
-            texto: 'Precios y flete actualizados',
+            texto: `Precios y flete actualizados${ivaChange}`,
           });
         }
         if (body.status !== undefined) {

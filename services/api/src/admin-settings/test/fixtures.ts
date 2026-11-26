@@ -1,5 +1,5 @@
 // Datos de EJEMPLO válidos para las pruebas (solo soporte de tests; no se empaqueta en la Lambda).
-import type { MailSettings, PublicSettings } from '@canteras/shared';
+import type { MailSettings, PublicSettings, QuotingSettings } from '@canteras/shared';
 
 export function publicSettings(over: Record<string, unknown> = {}): PublicSettings {
   return {
@@ -20,4 +20,8 @@ export function mailSettings(over: Record<string, unknown> = {}): MailSettings {
     plantillaCotizacion: 'Hola {{nombre}}, folio {{folio}}, total {{total}}.',
     ...over,
   } as MailSettings;
+}
+
+export function quotingSettings(over: Record<string, unknown> = {}): QuotingSettings {
+  return { ivaPctDefault: 16, ...over } as QuotingSettings;
 }

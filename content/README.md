@@ -11,7 +11,7 @@ Los esquemas de `packages/shared` son estrictos (no admiten campos extra), así 
 ```
 
 - `stones.json`, `finishes.json`, `projects.json`, `services.json`: la lista va en `items`.
-- `settings.json`: en lugar de `items` trae `public` (fila `PUBLIC`) y `mail` (fila `MAIL`).
+- `settings.json`: en lugar de `items` trae `public` (fila `PUBLIC`), `mail` (fila `MAIL`) y `quoting` (fila `QUOTING`: `ivaPctDefault`, el IVA que el dashboard preselecciona al cotizar por primera vez: `null` = sin IVA, `8` o `16`). La fila `QUOTING` nunca se publica en `catalog.json`.
 - Cada item lleva `"activa": true` (baja lógica: el dashboard nunca borra, solo pone `activa` en `false`).
 - Las piedras referencian acabados por **nombre**; los proyectos, por **id** (de piedra y de acabado).
 

@@ -86,19 +86,45 @@ export function buildQuoteEmail(input: {
   });
   const dias = fq.vigenciaDias;
   const vence = longDate.format(new Date(sentAt.getTime() + dias * DAY_MS));
+  // IVA solo sobre la piedra; el flete va aparte y sin impuesto (total = piedra + IVA + flete).
+  const sinIva = fq.iva === null || fq.ivaPct === null;
+  const subtotalText = `${money.format(fq.subtotal)} MXN`;
+  const ivaText = sinIva ? 'Sin IVA' : `${money.format(fq.iva ?? 0)} MXN (${fq.ivaPct} %)`;
+  const totalText = `${money.format(fq.total)} MXN${sinIva ? ' (sin IVA)' : ''}`;
   const values: Record<MailTemplateVariable, string> = {
     nombre: oneLine(quote.customer.nombre),
     folio: quote.folio,
     piedras: lines.join('\n'),
+    subtotal: subtotalText,
+    iva: ivaText,
     flete: `${money.format(fq.fleteFinal)} MXN`,
-    total: `${money.format(fq.total)} MXN (sin IVA)`,
+    total: totalText,
     vigencia: `${dias} ${dias === 1 ? 'día' : 'días'}, hasta el ${vence}`,
   };
 
   const subject = oneLine(renderMailText(mail.data.asuntoCotizacion, values));
+  // El desglose va SIEMPRE en el pie (no depende de que la plantilla use {{subtotal}} o {{iva}}),
+  // para que una plantilla guardada antes de existir el IVA siga mostrando los importes completos.
+  const breakdown = sinIva
+    ? [
+        `Piedra: ${subtotalText}`,
+        `Flete: ${money.format(fq.fleteFinal)} MXN`,
+        `Total: ${totalText}`,
+        '',
+        'Precios sin IVA. Los importes están en pesos mexicanos (MXN).',
+      ]
+    : [
+        `Piedra: ${subtotalText}`,
+        `IVA (${fq.ivaPct} %): ${money.format(fq.iva ?? 0)} MXN`,
+        `Flete (sin IVA): ${money.format(fq.fleteFinal)} MXN`,
+        `Total: ${totalText}`,
+        '',
+        'El IVA se calcula solo sobre la piedra. Los importes están en pesos mexicanos (MXN).',
+      ];
   const footer = [
     '',
-    'Los importes están en pesos mexicanos (MXN) y no incluyen IVA.',
+    'Resumen de importes:',
+    ...breakdown,
     '',
     `— ${oneLine(pub.data.nombrePatio)}`,
     `Horario: ${oneLine(pub.data.horario)}`,

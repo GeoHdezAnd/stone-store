@@ -103,6 +103,17 @@ const vigenciaSchema = z
   .min(1, 'La vigencia mínima es 1 día')
   .max(365, 'La vigencia máxima es 365 días');
 
+/**
+ * Tasas de IVA que el dueño puede elegir al cotizar: `null` = sin IVA, 8 % (frontera) o 16 %.
+ * Enum cerrado a propósito: nunca un porcentaje libre.
+ */
+export const IVA_RATES = [8, 16] as const;
+export type IvaRate = (typeof IVA_RATES)[number];
+export type IvaPct = IvaRate | null;
+export const ivaPctSchema = z
+  .union([z.literal(8), z.literal(16)], { error: 'El IVA debe ser 8 % o 16 %' })
+  .nullable();
+
 export const finalQuoteSchema = z.strictObject({
   items: z
     .array(
@@ -116,9 +127,9 @@ export const finalQuoteSchema = z.strictObject({
     .max(MAX_ITEMS),
   fleteFinal: storedMoney('El flete final'),
   subtotal: storedMoney('El subtotal'),
-  /** IVA pendiente de definir (CLAUDE.md 5.5): `null` = no aplica. */
+  /** IVA sobre la piedra (el flete no lleva IVA). `null` = sin IVA. Lo calcula el servidor. */
   iva: storedMoney('El IVA').nullable(),
-  ivaPct: z.number().min(0).max(100).nullable(),
+  ivaPct: ivaPctSchema,
   total: storedMoney('El total'),
   vigenciaDias: vigenciaSchema,
   /** La fija la acción de envío (3.3b). */
@@ -216,7 +227,7 @@ export const patchBodySchema = z
       .enum(PATCH_STATUSES, { error: 'El estado no se puede fijar por esta vía' })
       .optional(),
     lostReason: z.enum(LOST_REASONS, { error: 'El motivo de pérdida no es válido' }).optional(),
-    // El cliente NUNCA envía subtotales ni total: solo precios, flete y vigencia.
+    // El cliente NUNCA envía subtotales, IVA ni total: solo precios, flete, vigencia y tasa.
     finalQuote: z
       .strictObject({
         items: z
@@ -234,6 +245,9 @@ export const patchBodySchema = z
           ),
         fleteFinal: inputMoney('El flete final'),
         vigenciaDias: vigenciaSchema.default(DEFAULT_VIGENCIA_DIAS),
+        // Solo el owner puede mandarla (la ruta responde 403 al staff). Ausente = se conserva la
+        // tasa ya guardada o, en la primera cotización, sin IVA. El cliente nunca manda iva/total.
+        ivaPct: ivaPctSchema.optional(),
       })
       .optional(),
     rev: revSchema,

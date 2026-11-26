@@ -3,7 +3,7 @@ import type { Quote } from '@canteras/shared';
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
 import { describe, expect, it } from 'vitest';
 import { encodeCursor } from '../cursor';
-import { ID_A, ID_B, ID_C, PRICES, quote } from './fixtures';
+import { ID_A, ID_B, ID_C, PRICES, quote, quotedQuote } from './fixtures';
 import { MemoryQuoteRepository } from './memory-repository';
 import { createQuotesRouter } from '../routes';
 
@@ -432,7 +432,7 @@ describe('PATCH /admin/quotes/{quoteId}', () => {
     expect(r.json.history.map((h: any) => h.tipo)).toEqual(['edicion', 'estado']);
   });
 
-  it('el cliente no puede mandar subtotal ni total: 422', async () => {
+  it('el cliente no puede mandar subtotal, iva ni total: 422', async () => {
     const { repo, patch } = setup();
     repo.seed(quote({ status: 'en_revision' }));
     const r = await patch(ID_A, { finalQuote: { ...PRICES, total: 1 }, rev: 1 });
@@ -550,6 +550,211 @@ describe('PATCH /admin/quotes/{quoteId}', () => {
     const r = await patch(ID_A, { status: 'en_revision', rev: 1 });
     expect(r.status).toBe(500);
     expect(r.text).not.toContain('maria@example.com');
+  });
+});
+
+describe('PATCH: IVA por cotización (solo sobre la piedra; solo owner cambia la tasa)', () => {
+  const finalOf = (r: { json: any }) => r.json.finalQuote;
+
+  it('owner fija 16 %: IVA solo sobre la piedra y el flete va aparte', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quote({ status: 'en_revision' }));
+    const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: 16 }, rev: 1 });
+    expect(r.status).toBe(200);
+    expect(finalOf(r)).toMatchObject({
+      subtotal: 2105,
+      iva: 336.8,
+      ivaPct: 16,
+      fleteFinal: 1500,
+      total: 3941.8,
+    });
+  });
+
+  it('owner fija 8 %', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quote({ status: 'en_revision' }));
+    const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: 8 }, rev: 1 });
+    expect(finalOf(r)).toMatchObject({ iva: 168.4, ivaPct: 8, total: 3773.4 });
+  });
+
+  it('cambiar el flete no cambia el IVA (la base es solo la piedra)', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quote({ status: 'en_revision' }));
+    const r = await patch(ID_A, {
+      finalQuote: { ...PRICES, fleteFinal: 99999, ivaPct: 16 },
+      rev: 1,
+    });
+    expect(finalOf(r).iva).toBe(336.8);
+    expect(finalOf(r).total).toBe(2105 + 336.8 + 99999);
+  });
+
+  it('owner con ivaPct null explícito: sin IVA', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quotedQuote({}, 16));
+    const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: null }, rev: 1 });
+    expect(finalOf(r)).toMatchObject({ iva: null, ivaPct: null, total: 3605 });
+  });
+
+  it('primera cotización sin ivaPct en el cuerpo: sin IVA (no usa ningún default)', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quote({ status: 'en_revision' }));
+    const r = await patch(ID_A, { finalQuote: PRICES, rev: 1 });
+    expect(finalOf(r)).toMatchObject({ iva: null, ivaPct: null, total: 3605 });
+    expect(repo.calls.some((c) => c.includes('QUOTING'))).toBe(false);
+  });
+
+  it('owner re-guarda precios sin ivaPct: CONSERVA la tasa guardada', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quotedQuote({}, 16));
+    const r = await patch(ID_A, { finalQuote: { ...PRICES, fleteFinal: 200 }, rev: 1 });
+    expect(finalOf(r)).toMatchObject({ ivaPct: 16, iva: 336.8, total: 2105 + 336.8 + 200 });
+  });
+
+  it('staff re-guarda precios en una cotización con tasa del owner: la tasa se CONSERVA', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quotedQuote({}, 8));
+    const r = await patch(
+      ID_A,
+      {
+        finalQuote: {
+          items: [
+            { stoneId: 'arenisca', precioUnitario: 100 },
+            { stoneId: 'caliza', precioUnitario: 300 },
+          ],
+          fleteFinal: 1000,
+        },
+        rev: 1,
+      },
+      '[staff]',
+    );
+    expect(r.status).toBe(200);
+    // piedra = 10 × 100 + 3 × 300 = 1900; IVA 8 % = 152
+    expect(finalOf(r)).toMatchObject({ subtotal: 1900, ivaPct: 8, iva: 152, total: 3052 });
+  });
+
+  it('staff en la primera cotización (sin tasa previa): sin IVA', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quote({ status: 'en_revision' }));
+    const r = await patch(ID_A, { finalQuote: PRICES, rev: 1 }, '[staff]');
+    expect(finalOf(r)).toMatchObject({ ivaPct: null, iva: null });
+  });
+
+  it.each([null, 8, 16])(
+    'staff que manda ivaPct %s (aunque sea el mismo valor): 403 y SIN efectos',
+    async (pct) => {
+      const { repo, patch } = setup();
+      repo.seed(quotedQuote({}, pct === 16 ? 16 : null));
+      const antes = structuredClone(repo.rows.get(ID_A));
+      const callsAntes = repo.calls.length;
+      const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: pct }, rev: 1 }, '[staff]');
+      expect(r.status).toBe(403);
+      expect(r.json.error).toBe('forbidden');
+      expect(repo.audits).toHaveLength(0);
+      expect(repo.rows.get(ID_A)).toEqual(antes);
+      expect(repo.calls.slice(callsAntes).some((c) => c.startsWith('update'))).toBe(false);
+    },
+  );
+
+  it('staff con ivaPct y cotización bloqueada: 403 (el permiso va antes que el estado)', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quote({ status: 'enviada' }));
+    const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: 16 }, rev: 1 }, '[staff]');
+    expect(r.status).toBe(403);
+  });
+
+  it('cotización enviada/ganada/perdida: quote_locked también con ivaPct (owner)', async () => {
+    for (const status of ['enviada', 'ganada', 'perdida', 'cancelada'] as const) {
+      const { repo, patch } = setup();
+      repo.seed(quotedQuote({ status }, 16));
+      const antes = structuredClone(repo.rows.get(ID_A));
+      const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: 8 }, rev: 1 });
+      expect(r.status, status).toBe(409);
+      expect(r.json.error).toBe('quote_locked');
+      expect(repo.rows.get(ID_A)).toEqual(antes);
+    }
+  });
+
+  it('ivaPct fuera del enum: 422 sin escribir (7, 0, 16.0001, 15, 100, "16")', async () => {
+    for (const v of [7, 0, 16.0001, 15, 100, '16', -8]) {
+      const { repo, patch } = setup();
+      repo.seed(quote({ status: 'en_revision' }));
+      const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: v }, rev: 1 });
+      expect(r.status, String(v)).toBe(422);
+      expect(repo.audits).toHaveLength(0);
+    }
+  });
+
+  it('el cliente no puede mandar iva ni total junto con ivaPct: 422', async () => {
+    for (const extra of [{ iva: 1 }, { total: 1 }, { subtotal: 1 }]) {
+      const { repo, patch } = setup();
+      repo.seed(quote({ status: 'en_revision' }));
+      const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: 16, ...extra }, rev: 1 });
+      expect(r.status).toBe(422);
+    }
+  });
+
+  it('`__proto__` dentro del finalQuote: 422', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quote({ status: 'en_revision' }));
+    const body = JSON.parse(
+      '{"rev":1,"finalQuote":{"items":[{"stoneId":"arenisca","precioUnitario":1},{"stoneId":"caliza","precioUnitario":1}],"fleteFinal":0,"__proto__":{"ivaPct":16}}}',
+    );
+    expect((await patch(ID_A, body)).status).toBe(422);
+    expect((await patch(ID_A, body, '[staff]')).status).toBe(422);
+  });
+
+  it('rev viejo con ivaPct: 409 conflict y no escribe', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quote({ status: 'en_revision', rev: 3 }));
+    const r = await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: 16 }, rev: 1 });
+    expect(r.status).toBe(409);
+    expect(r.json.error).toBe('conflict');
+    expect(repo.audits).toHaveLength(0);
+  });
+
+  it('un PATCH solo de estado conserva el finalQuote con su IVA tal cual', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quotedQuote({}, 16));
+    const antes = quotedQuote({}, 16).finalQuote;
+    const r = await patch(ID_A, { status: 'en_revision', rev: 1 });
+    expect(r.status).toBe(200);
+    expect(finalOf(r)).toEqual(antes);
+  });
+
+  it('la auditoría registra subtotal, iva, ivaPct, flete y total (antes y después) sin PII', async () => {
+    const { repo, patch } = setup();
+    repo.seed(quotedQuote({}, null));
+    await patch(ID_A, { finalQuote: { ...PRICES, ivaPct: 16 }, rev: 1 });
+    expect(repo.audits[0]).toMatchObject({
+      antes: {
+        finalQuote: { subtotal: 2105, iva: null, ivaPct: null, fleteFinal: 1500, total: 3605 },
+      },
+      despues: {
+        finalQuote: { subtotal: 2105, iva: 336.8, ivaPct: 16, fleteFinal: 1500, total: 3941.8 },
+      },
+    });
+  });
+
+  it('el historial dice qué cambió: IVA solo cuando la tasa cambia', async () => {
+    const a = setup();
+    a.repo.seed(quotedQuote({}, null));
+    const r1 = await a.patch(ID_A, { finalQuote: { ...PRICES, ivaPct: 16 }, rev: 1 });
+    expect(r1.json.history.at(-1).texto).toBe('Precios y flete actualizados. IVA 16 %');
+
+    const b = setup();
+    b.repo.seed(quotedQuote({}, 16));
+    const r2 = await b.patch(ID_A, { finalQuote: { ...PRICES, ivaPct: null }, rev: 1 });
+    expect(r2.json.history.at(-1).texto).toBe('Precios y flete actualizados. Sin IVA');
+
+    const c = setup();
+    c.repo.seed(quotedQuote({}, 16));
+    const r3 = await c.patch(ID_A, { finalQuote: PRICES, rev: 1 }, '[staff]');
+    expect(r3.json.history.at(-1).texto).toBe('Precios y flete actualizados');
+
+    const d = setup();
+    d.repo.seed(quote({ status: 'en_revision' }));
+    const r4 = await d.patch(ID_A, { finalQuote: PRICES, rev: 1 });
+    expect(r4.json.history.at(-1).texto).toBe('Precios y flete actualizados');
   });
 });
 
@@ -735,6 +940,17 @@ function bigQuote(target: number): Quote {
   q = { ...base, notes };
   return q;
 }
+
+describe('GET /admin/quotes/export.csv: columnas de IVA', () => {
+  it('incluye subtotal de la piedra, tasa, IVA, flete y total', async () => {
+    const { repo, call } = setup();
+    repo.seed(quotedQuote({}, 16));
+    const r = await call({ path: '/admin/quotes/export.csv' });
+    expect(r.status).toBe(200);
+    expect(r.text).toContain('"Subtotal piedra","IVA %","IVA","Flete final","Total"');
+    expect(r.text).toContain('"2105.00","16","336.80","1500.00","3941.80"');
+  });
+});
 
 describe('tope de 400 KB por bytes (409 quote_too_large)', () => {
   it('una nota CJK que haría pasar los ~350 KB da 409 con mensaje claro, no 500', async () => {

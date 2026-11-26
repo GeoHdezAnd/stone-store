@@ -13,7 +13,7 @@ interface Kpi {
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 function amountNotes(prefix: string, card: Cards['quoted']): string[] {
-  const notes = [`${prefix}: ${formatMxn(card.value)} (sin IVA)`];
+  const notes = [`${prefix}: ${formatMxn(card.value)} (con IVA, si lo lleva, y flete)`];
   if (card.withoutAmount > 0) {
     notes.push(`${plural(card.withoutAmount, 'solicitud', 'solicitudes')} sin importe capturado`);
   }

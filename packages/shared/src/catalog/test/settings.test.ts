@@ -3,6 +3,7 @@ import {
   MAIL_TEMPLATE_VARIABLES,
   mailSettingsSchema,
   publicSettingsSchema,
+  quotingSettingsSchema,
   renderMailTemplate,
   renderMailText,
   SETTINGS_ROW_KEYS,
@@ -88,11 +89,13 @@ describe('mailSettingsSchema', () => {
     expect(mailSettingsSchema.parse(correo)).toEqual(correo);
   });
 
-  it('expone las 6 variables permitidas', () => {
+  it('expone las 8 variables permitidas (incluye subtotal e iva)', () => {
     expect([...MAIL_TEMPLATE_VARIABLES]).toEqual([
       'nombre',
       'folio',
       'piedras',
+      'subtotal',
+      'iva',
       'flete',
       'total',
       'vigencia',
@@ -146,8 +149,10 @@ describe('renderMailTemplate', () => {
     nombre: 'Ana',
     folio: 'CN-2026-00001',
     piedras: 'Arenisca',
+    subtotal: '$4,000',
+    iva: '$640',
     flete: '$1,000',
-    total: '$5,000',
+    total: '$5,640',
     vigencia: '15 días',
   };
 
@@ -181,8 +186,8 @@ describe('renderMailTemplate', () => {
 });
 
 describe('SETTINGS_ROW_KEYS', () => {
-  it('son las claves de fila que usa el seed: PUBLIC y MAIL', () => {
-    expect(SETTINGS_ROW_KEYS).toEqual({ public: 'PUBLIC', mail: 'MAIL' });
+  it('son las claves de fila que usa el seed: PUBLIC, MAIL y QUOTING', () => {
+    expect(SETTINGS_ROW_KEYS).toEqual({ public: 'PUBLIC', mail: 'MAIL', quoting: 'QUOTING' });
   });
 });
 
@@ -191,6 +196,8 @@ describe('renderMailText (sin escape: asunto y texto plano)', () => {
     nombre: 'Ana & <Luis>',
     folio: 'CN-1',
     piedras: 'x',
+    subtotal: 's',
+    iva: 'i',
     flete: 'y',
     total: 'z',
     vigencia: 'v',
@@ -204,5 +211,32 @@ describe('renderMailText (sin escape: asunto y texto plano)', () => {
   it('rechaza variables desconocidas y valores faltantes', () => {
     expect(() => renderMailText('{{secreto}}', valores)).toThrow(/no permitida/);
     expect(() => renderMailText('{{nombre}}', { folio: 'x' } as never)).toThrow(/Falta el valor/);
+  });
+});
+
+describe('quotingSettingsSchema (fila QUOTING)', () => {
+  it('acepta null, 8 y 16 como IVA por defecto', () => {
+    for (const v of [null, 8, 16]) {
+      expect(quotingSettingsSchema.parse({ ivaPctDefault: v })).toEqual({ ivaPctDefault: v });
+    }
+  });
+
+  it('rechaza cualquier otro valor, tipos forzados y campo ausente', () => {
+    for (const v of [0, 7, 15, 16.0001, 100, -8, '16', true, undefined, Number.NaN]) {
+      expect(quotingSettingsSchema.safeParse({ ivaPctDefault: v }).success, String(v)).toBe(false);
+    }
+    expect(quotingSettingsSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('es estricto: rechaza claves extra', () => {
+    expect(quotingSettingsSchema.safeParse({ ivaPctDefault: 16, x: 1 }).success).toBe(false);
+    expect(
+      quotingSettingsSchema.safeParse(JSON.parse('{"ivaPctDefault":16,"__proto__":{"a":1}}'))
+        .success,
+    ).toBe(false);
+  });
+
+  it('SETTINGS_ROW_KEYS incluye QUOTING', () => {
+    expect(SETTINGS_ROW_KEYS.quoting).toBe('QUOTING');
   });
 });

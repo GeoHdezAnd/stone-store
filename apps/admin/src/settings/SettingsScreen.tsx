@@ -7,10 +7,11 @@ import { PageHeader } from '../components/PageHeader';
 import { useAsyncResource } from '../hooks/useAsyncResource';
 import { usePermissions } from '../hooks/usePermissions';
 import { MailTemplateHelp } from './MailTemplateHelp';
+import { QuotingSection } from './QuotingSection';
 import { SettingsSection } from './SettingsSection';
 import { mailFields, publicFields } from './sections';
 
-/** Configuración: datos del patio y correo de cotización, cada uno con su guardado. */
+/** Configuración: patio, correo de cotización e IVA por defecto, cada uno con su guardado. */
 export function SettingsScreen() {
   const apiFetch = useApi();
   const api = useMemo(() => createSettingsApi(apiFetch), [apiFetch]);
@@ -53,6 +54,11 @@ export function SettingsScreen() {
             onSave={(values) => api.save('mail', values)}
             successMessage="Correo de cotización guardado."
             renderExtra={(draft) => <MailTemplateHelp draft={draft} />}
+          />
+          <QuotingSection
+            initial={state.data.quoting}
+            canEdit={canEditSettings}
+            onSave={(values) => api.save('quoting', values)}
           />
         </>
       )}

@@ -2,7 +2,7 @@ import { GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { SETTINGS_ROW_KEYS } from '@canteras/shared';
 import type { AuditEntry } from '../lib/audit';
 
-/** Valor de la clave de partición de las dos filas únicas (`PUBLIC` y `MAIL`). */
+/** Valor de la clave de partición de las filas únicas (`PUBLIC`, `MAIL` y `QUOTING`). */
 export type SettingsRowKey = (typeof SETTINGS_ROW_KEYS)[keyof typeof SETTINGS_ROW_KEYS];
 
 /** Transacción cancelada por un conflicto con otra en curso (`TransactionConflict`): reintentable. */
@@ -14,7 +14,7 @@ export class ConflictError extends Error {
 }
 
 /**
- * Acceso a datos de la configuración. Son dos filas únicas; no hay borrado ni listado.
+ * Acceso a datos de la configuración. Son tres filas únicas; no hay borrado ni listado.
  * `put` es un UPSERT ATÓMICO: la fila y su auditoría se guardan juntas o no se guarda ninguna.
  */
 export interface SettingsRepository {

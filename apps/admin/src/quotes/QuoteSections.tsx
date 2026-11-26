@@ -7,7 +7,7 @@ import { Timeline } from '../components/Timeline';
 import type { TimelineEntry } from '../components/Timeline';
 import { formatNumber, unitLabel } from '../lib/freightLabels';
 import { formatDateTime, shortUser } from '../lib/publishLabels';
-import { formatMxn, lostReasonLabel, statusLabel } from '../lib/quoteLabels';
+import { formatMxn, ivaPctLabel, lostReasonLabel, statusLabel } from '../lib/quoteLabels';
 
 /** Cliente y obra. Teléfono y correo son enlaces (tel: y mailto:). */
 export function ClientBlock({ quote }: { quote: Quote }) {
@@ -81,9 +81,13 @@ export function FinalQuoteSummary({ quote }: { quote: Quote }) {
   return (
     <KeyValueList
       items={[
-        { label: 'Subtotal', value: formatMxn(fq.subtotal) },
-        { label: 'Flete final', value: formatMxn(fq.fleteFinal) },
-        { label: 'Total (sin IVA)', value: formatMxn(fq.total) },
+        { label: 'Piedra', value: formatMxn(fq.subtotal) },
+        {
+          label: fq.ivaPct === null ? 'IVA' : `IVA (${ivaPctLabel(fq.ivaPct)})`,
+          value: fq.iva === null ? 'Sin IVA' : formatMxn(fq.iva),
+        },
+        { label: 'Flete final (sin IVA)', value: formatMxn(fq.fleteFinal) },
+        { label: 'Total', value: formatMxn(fq.total) },
         { label: 'Vigencia', value: `${fq.vigenciaDias} días` },
         ...(fq.enviadaAt ? [{ label: 'Enviada', value: formatDateTime(fq.enviadaAt) }] : []),
       ]}

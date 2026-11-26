@@ -12,6 +12,9 @@
   },
   "mail": {
     "asuntoCotizacion": "Tu cotización {{folio}} de Canteras Naturales",
-    "plantillaCotizacion": "Hola {{nombre}},\n\nGracias por escribirnos. Esta es tu cotización con folio {{folio}}.\n\nPiedras: {{piedras}}\nFlete: {{flete}}\nTotal: {{total}}\n\nLa cotización tiene una vigencia de {{vigencia}}.\n\nSaludos,\nCanteras Naturales (correo de ejemplo)"
+    "plantillaCotizacion": "Hola {{nombre}},\n\nGracias por escribirnos. Esta es tu cotización con folio {{folio}}.\n\nPiedras:\n{{piedras}}\n\nLa cotización tiene una vigencia de {{vigencia}}. Al final de este correo encontrarás el resumen de importes (piedra, IVA, flete y total).\n\nSaludos,\nCanteras Naturales (correo de ejemplo)"
+  },
+  "quoting": {
+    "ivaPctDefault": null
   }
 }

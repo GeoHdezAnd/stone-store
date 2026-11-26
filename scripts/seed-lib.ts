@@ -12,6 +12,7 @@ import {
   mailSettingsSchema,
   projectSchema,
   publicSettingsSchema,
+  quotingSettingsSchema,
   serviceSchema,
   SETTINGS_ROW_KEYS,
   stoneSchema,
@@ -117,6 +118,7 @@ export function buildSeedPlan(raw: RawContent): SeedTable[] {
   const settingsEnv = envelope(FILES.settings, raw.settings, errors);
   const pub = publicSettingsSchema.safeParse(settingsEnv?.['public']);
   const mail = mailSettingsSchema.safeParse(settingsEnv?.['mail']);
+  const quoting = quotingSettingsSchema.safeParse(settingsEnv?.['quoting']);
   if (settingsEnv && !pub.success) {
     for (const i of pub.error.issues)
       errors.push(`settings.json.public.${i.path.join('.')}: ${i.message}`);
@@ -124,6 +126,10 @@ export function buildSeedPlan(raw: RawContent): SeedTable[] {
   if (settingsEnv && !mail.success) {
     for (const i of mail.error.issues)
       errors.push(`settings.json.mail.${i.path.join('.')}: ${i.message}`);
+  }
+  if (settingsEnv && !quoting.success) {
+    for (const i of quoting.error.issues)
+      errors.push(`settings.json.quoting.${i.path.join('.')}: ${i.message}`);
   }
 
   // Integridad referencial. Las piedras guardan los acabados por NOMBRE; los proyectos por id.
@@ -148,7 +154,8 @@ export function buildSeedPlan(raw: RawContent): SeedTable[] {
     }
   }
 
-  if (errors.length > 0 || !pub.success || !mail.success) throw new SeedValidationError(errors);
+  if (errors.length > 0 || !pub.success || !mail.success || !quoting.success)
+    throw new SeedValidationError(errors);
 
   return [
     { table: 'Stones', key: 'id', items: stones },
@@ -161,6 +168,7 @@ export function buildSeedPlan(raw: RawContent): SeedTable[] {
       items: [
         { key: SETTINGS_ROW_KEYS.public, ...pub.data },
         { key: SETTINGS_ROW_KEYS.mail, ...mail.data },
+        { key: SETTINGS_ROW_KEYS.quoting, ...quoting.data },
       ],
     },
   ];

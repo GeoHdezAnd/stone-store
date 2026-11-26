@@ -35,12 +35,19 @@ describe('seed: contenido de ejemplo', () => {
     expect(plan['Settings']?.key).toBe('key');
   });
 
-  it('guarda settings como filas PUBLIC y MAIL', () => {
+  it('guarda settings como filas PUBLIC, MAIL y QUOTING', () => {
     const settings = buildSeedPlan(real()).find((t) => t.table === 'Settings');
     const claves = settings?.items.map((i) => i['key']);
-    expect(claves).toEqual(['PUBLIC', 'MAIL']);
+    expect(claves).toEqual(['PUBLIC', 'MAIL', 'QUOTING']);
     expect(settings?.items[0]).toHaveProperty('nombrePatio');
     expect(settings?.items[1]).toHaveProperty('plantillaCotizacion');
+    expect(settings?.items[2]).toEqual({ key: 'QUOTING', ivaPctDefault: null });
+  });
+
+  it('la fila QUOTING NO lleva datos de PUBLIC ni de MAIL (no se publica)', () => {
+    const settings = buildSeedPlan(real()).find((t) => t.table === 'Settings');
+    const quoting = settings?.items.find((i) => i['key'] === 'QUOTING');
+    expect(Object.keys(quoting ?? {}).sort()).toEqual(['ivaPctDefault', 'key']);
   });
 
   it('dos proyectos publicados y uno en borrador', () => {
@@ -81,6 +88,20 @@ describe('seed: rechazo de datos inválidos', () => {
       'asuntoCotizacion'
     ] = 'Hola {{secreto}}';
     expect(mensajes(raw)).toContain('settings.json.mail.asuntoCotizacion');
+  });
+
+  it.each([7, 0, 16.5, '16'])('rechaza un IVA por defecto inválido (%s)', (v) => {
+    const raw = real();
+    ((raw.settings as Record<string, unknown>)['quoting'] as Record<string, unknown>)[
+      'ivaPctDefault'
+    ] = v;
+    expect(mensajes(raw)).toContain('settings.json.quoting.ivaPctDefault');
+  });
+
+  it('rechaza un settings.json sin la sección quoting', () => {
+    const raw = real();
+    delete (raw.settings as Record<string, unknown>)['quoting'];
+    expect(mensajes(raw)).toContain('settings.json.quoting');
   });
 
   it('rechaza si "items" no es una lista', () => {

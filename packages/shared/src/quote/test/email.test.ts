@@ -31,12 +31,75 @@ describe('buildQuoteEmail', () => {
     expect(m.html).toContain('Hola Cliente Ejemplo,');
   });
 
-  it('formatea dinero en MXN es-MX, con renglones y «sin IVA»', () => {
+  it('formatea dinero en MXN es-MX con renglones por piedra', () => {
     const { text } = build();
     expect(text).toContain('Arenisca (Labrado): 10.5 m² × $120.10 = $1,261.05');
     expect(text).toContain('Caliza: 3 pieza(s) × $0.10 = $0.30');
     expect(text).toContain('Flete: $1,500.05 MXN');
+  });
+
+  it('sin IVA (ivaPct null): lo dice con claridad y total = piedra + flete', () => {
+    const { text, html } = build();
     expect(text).toContain('Total: $2,761.40 MXN (sin IVA)');
+    expect(text).toContain('Precios sin IVA');
+    expect(text).not.toContain('IVA (');
+    expect(html).toContain('Precios sin IVA');
+  });
+
+  const con16 = (over = {}) => {
+    const q = sampleQuote();
+    return {
+      finalQuote: {
+        ...q.finalQuote!,
+        subtotal: 1261.35,
+        iva: 201.82,
+        ivaPct: 16 as const,
+        total: 2963.22,
+        ...over,
+      },
+    };
+  };
+
+  it('con IVA: desglose Piedra / IVA (16 %) / Flete / Total, sin «(sin IVA)»', () => {
+    const { text, html } = build(con16());
+    expect(text).toContain('Piedra: $1,261.35 MXN');
+    expect(text).toContain('IVA (16 %): $201.82 MXN');
+    expect(text).toContain('Flete (sin IVA): $1,500.05 MXN');
+    expect(text).toContain('Total: $2,963.22 MXN');
+    expect(text).not.toMatch(/Total: .*\(sin IVA\)/);
+    expect(text).not.toContain('Precios sin IVA');
+    expect(text).not.toContain('no incluyen IVA');
+    expect(html).toContain('IVA (16 %): $201.82 MXN');
+  });
+
+  it('con IVA 8 %', () => {
+    const { text } = build(con16({ iva: 100.91, ivaPct: 8, total: 2862.31 }));
+    expect(text).toContain('IVA (8 %): $100.91 MXN');
+  });
+
+  it('el desglose NO depende de la plantilla: sale aunque no use {{subtotal}} ni {{iva}}', () => {
+    const ms = mailSettingsSchema.parse({
+      asuntoCotizacion: 'Cotización {{folio}}',
+      plantillaCotizacion: 'Hola {{nombre}}, folio {{folio}}.',
+    });
+    const { text, html } = build(con16(), ms);
+    for (const s of [text, html]) {
+      expect(s).toContain('Piedra: $1,261.35 MXN');
+      expect(s).toContain('IVA (16 %): $201.82 MXN');
+      expect(s).toContain('Flete (sin IVA): $1,500.05 MXN');
+      expect(s).toContain('Total: $2,963.22 MXN');
+    }
+  });
+
+  it('las variables {{subtotal}} e {{iva}} se renderizan en la plantilla', () => {
+    const ms = mailSettingsSchema.parse({
+      asuntoCotizacion: 'x',
+      plantillaCotizacion: 'S={{subtotal}};I={{iva}};T={{total}}',
+    });
+    const t16 = build(con16(), ms).text;
+    expect(t16).toContain('S=$1,261.35 MXN;I=$201.82 MXN (16 %);T=$2,963.22 MXN');
+    const t0 = build({}, ms).text;
+    expect(t0).toContain('S=$1,261.35 MXN;I=Sin IVA;T=$2,761.40 MXN (sin IVA)');
   });
 
   it('vigencia en días y fecha de vencimiento (México)', () => {
@@ -53,7 +116,7 @@ describe('buildQuoteEmail', () => {
 
   it('agrega el aviso de importes y el pie del patio', () => {
     const { text } = build();
-    expect(text).toContain('no incluyen IVA');
+    expect(text).toContain('Los importes están en pesos mexicanos (MXN)');
     expect(text).toContain('Horario: Lunes a sábado, 8:00 a 17:00 (ejemplo)');
   });
 

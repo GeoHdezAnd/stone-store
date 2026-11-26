@@ -76,7 +76,7 @@ describe('quotesToCsv', () => {
   it('solo trae las columnas pedidas y los importes con 2 decimales', () => {
     const csv = quotesToCsv([sampleQuote()]);
     const head = csv.slice(1).split('\r\n')[0]!;
-    expect(head.split('","')).toHaveLength(12);
+    expect(head.split('","')).toHaveLength(15);
     expect(csv).toContain('"2761.40"');
     expect(csv).toContain('"1500.05"');
     expect(csv).not.toContain('notas internas');
@@ -95,5 +95,37 @@ describe('quotesToCsv', () => {
     const rows = Array.from({ length: MAX_EXPORT_ROWS + 1 }, () => sampleQuote());
     expect(() => quotesToCsv(rows)).toThrow(RangeError);
     expect(() => quotesToCsv(rows.slice(0, MAX_EXPORT_ROWS))).not.toThrow();
+  });
+});
+
+describe('columnas de importes (IVA solo sobre la piedra)', () => {
+  const headerOf = (csv: string) => csv.slice(1).split('\r\n')[0]!;
+  const rowOf = (csv: string) => csv.slice(1).split('\r\n')[1]!;
+
+  it('encabezados: Subtotal piedra, IVA %, IVA, Flete final y Total', () => {
+    const h = headerOf(quotesToCsv([sampleQuote()]));
+    expect(h).toContain('"Piedras","Subtotal piedra","IVA %","IVA","Flete final","Total"');
+  });
+
+  it('sin IVA: IVA % e IVA vacíos', () => {
+    const row = rowOf(quotesToCsv([sampleQuote()]));
+    expect(row).toContain('"1261.35","","","1500.05","2761.40"');
+  });
+
+  it('con 16 %: tasa, IVA, flete y total', () => {
+    const q = sampleQuote();
+    const csv = quotesToCsv([
+      {
+        ...q,
+        finalQuote: { ...q.finalQuote!, iva: 201.82, ivaPct: 16, total: 2963.22 },
+      },
+    ]);
+    expect(rowOf(csv)).toContain('"1261.35","16","201.82","1500.05","2963.22"');
+  });
+
+  it('sin cotización final: celdas de importes vacías', () => {
+    const q = sampleQuote();
+    delete (q as { finalQuote?: unknown }).finalQuote;
+    expect(rowOf(quotesToCsv([q]))).toContain('"","","","",""');
   });
 });

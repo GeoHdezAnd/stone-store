@@ -14,6 +14,7 @@ import {
   FreightError,
   freightConfigSchema,
   generateUlid,
+  type IvaPct,
   LOST_REASONS,
   quoteIndexKeys,
   quoteSchema,
@@ -29,6 +30,9 @@ import { buildFreightSeed, readFreightContent } from './seed-freight-lib';
 import { checkSeedEnv } from './seed-freight-lib';
 
 export { checkSeedEnv };
+
+// Mezcla de tasas de IVA de las cotizaciones de ejemplo (índice = i % 4).
+const SEED_IVA_PCTS: readonly IvaPct[] = [null, 16, 16, 8];
 
 /**
  * Salvaguardas del seed de solicitudes. En prod consume los contadores de folio REALES (`Counters`):
@@ -284,6 +288,8 @@ export function buildQuoteSeeds(input: {
         })),
         fleteFinal: freight?.estimadoMax ?? 1500,
         vigenciaDias: 15,
+        // Mezcla de ejemplo: sin IVA, 16 % (la más común) y 8 %.
+        ivaPct: SEED_IVA_PCTS[i % SEED_IVA_PCTS.length] ?? null,
       });
       finalQuote = computed;
       estado('en_revision', 'cotizada');

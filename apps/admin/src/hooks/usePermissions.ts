@@ -16,6 +16,8 @@ export function usePermissions() {
     canEditFreight: isOwner,
     canExportQuotes: isOwner,
     canSendQuote: isOwner,
+    /** Solo el dueño cambia la tasa de IVA de una cotización (la API responde 403 al staff). */
+    canEditIva: isOwner,
     /** Transición de estado permitida a alguno de mis roles (staff solo prepara). */
     canTransitionTo: (from: string, to: string) =>
       user?.roles.some((role) => canRoleTransition(role, from, to)) ?? false,

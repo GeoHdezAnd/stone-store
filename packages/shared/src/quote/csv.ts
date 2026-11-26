@@ -18,8 +18,11 @@ const HEADERS = [
   'Código postal',
   'Lugar de la obra',
   'Piedras',
-  'Total',
+  'Subtotal piedra',
+  'IVA %',
+  'IVA',
   'Flete final',
+  'Total',
   'Motivo de pérdida',
 ] as const;
 
@@ -40,6 +43,9 @@ const cell = (value: string): string => `"${neutralizeFormula(value).replace(/"/
 // Los importes son números generados por el sistema (nunca negativos): no pasan por el filtro.
 const money = (n: number | undefined): string => (n === undefined ? '""' : `"${n.toFixed(2)}"`);
 
+const pct = (n: number | null | undefined): string =>
+  n === null || n === undefined ? '""' : `"${n}"`;
+
 /** Lanza `RangeError` si hay más filas que el tope (quien llama debe recortar a propósito). */
 export function quotesToCsv(rows: readonly Quote[]): string {
   if (rows.length > MAX_EXPORT_ROWS) {
@@ -58,8 +64,12 @@ export function quotesToCsv(rows: readonly Quote[]): string {
         cell(q.works.codigoPostal),
         cell(q.works.lugar),
         cell(q.items.map((i) => i.nombre).join('; ')),
-        money(q.finalQuote?.total),
+        money(q.finalQuote?.subtotal),
+        // Tasa y monto de IVA: vacíos cuando la cotización es sin IVA (`null`).
+        pct(q.finalQuote?.ivaPct),
+        money(q.finalQuote?.iva ?? undefined),
         money(q.finalQuote?.fleteFinal),
+        money(q.finalQuote?.total),
         cell(q.lostReason ?? ''),
       ].join(','),
     );

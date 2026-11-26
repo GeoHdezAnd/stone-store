@@ -11,10 +11,17 @@ import { PageHeader } from '../components/PageHeader';
 import { SelectField } from '../components/SelectField';
 import { Tag } from '../components/Tag';
 import { useBefore } from '../hooks/useBefore';
+import { useIvaDefault } from '../hooks/useIvaDefault';
 import { usePermissions } from '../hooks/usePermissions';
 import { useQuotesApi } from '../hooks/useQuotesApi';
 import { useToastedAction } from '../hooks/useToastedAction';
-import { LOST_REASON_LABELS, STATUS_TONES, formatMxn, statusLabel } from '../lib/quoteLabels';
+import {
+  LOST_REASON_LABELS,
+  STATUS_TONES,
+  formatMxn,
+  statusLabel,
+  totalNote,
+} from '../lib/quoteLabels';
 import { whatsappLink } from '../lib/whatsapp';
 import { FinalQuoteForm } from './FinalQuoteForm';
 import { NotesPanel } from './NotesPanel';
@@ -52,7 +59,8 @@ function transitionLabel(from: QuoteStatus, to: QuoteStatus): string {
 /** Contenedor del detalle: estado de la solicitud, escrituras con `rev` y manejo de conflictos. */
 export function QuoteDetail({ initial }: { initial: Quote }) {
   const api = useQuotesApi();
-  const { canSendQuote, canTransitionTo } = usePermissions();
+  const { canSendQuote, canTransitionTo, canEditIva } = usePermissions();
+  const ivaDefault = useIvaDefault();
   const { pending: requestPending, run } = useToastedAction();
   const [quote, setQuote] = useState(initial);
   const [problem, setProblem] = useState<Problem>(null);
@@ -75,7 +83,11 @@ export function QuoteDetail({ initial }: { initial: Quote }) {
     setDialog(null);
   };
   // El borrador vive aquí: un 409 o una recarga no borran lo que se escribió.
-  const finalDraft = useFinalQuoteDraft(quote);
+  const finalDraft = useFinalQuoteDraft(quote, {
+    isOwner: canEditIva,
+    ivaDefault,
+    editable: PREPARATION.includes(quote.status),
+  });
 
   // Candado de envío vigente (lo pone el servidor): no se escribe hasta que termine o venza.
   const lockActive = useBefore(
@@ -163,7 +175,9 @@ export function QuoteDetail({ initial }: { initial: Quote }) {
   const message = [
     `Hola ${quote.customer.nombre}, te escribimos de Canteras Naturales sobre tu solicitud ${quote.folio}`,
     `(${quote.items.map((i) => i.nombre).join(', ')}).`,
-    total === undefined ? '' : `Total: ${formatMxn(total)} (sin IVA).`,
+    total === undefined
+      ? ''
+      : `Total: ${formatMxn(total)} (${totalNote(quote.finalQuote?.ivaPct)}).`,
   ]
     .filter(Boolean)
     .join(' ');
@@ -233,6 +247,9 @@ export function QuoteDetail({ initial }: { initial: Quote }) {
               draft={finalDraft.draft}
               onDraftChange={finalDraft.setDraft}
               preview={finalDraft.preview}
+              canEditIva={canEditIva}
+              onIvaChange={finalDraft.setIvaPct}
+              ivaFromDefault={finalDraft.ivaFromDefault}
               onAcceptEstimate={finalDraft.acceptEstimate}
               canAcceptEstimate={quote.freight !== undefined}
               disabled={pending}
@@ -339,8 +356,17 @@ export function QuoteDetail({ initial }: { initial: Quote }) {
         }
         onCancel={() => setDialog(null)}
       >
-        Se enviará la cotización a {maskEmail(quote.customer.correo)} por un total de{' '}
-        {total === undefined ? '—' : formatMxn(total)} (sin IVA). El correo no se puede deshacer.
+        {quote.finalQuote?.ivaPct == null ? (
+          <Notice tone="error">
+            Esta cotización se enviará SIN IVA. Si debe llevarlo, cancela, elige la tasa y guarda
+            antes de enviar.
+          </Notice>
+        ) : null}
+        <p>
+          Se enviará la cotización a {maskEmail(quote.customer.correo)} por un total de{' '}
+          {total === undefined ? '—' : formatMxn(total)} ({totalNote(quote.finalQuote?.ivaPct)}). El
+          correo no se puede deshacer.
+        </p>
       </ConfirmDialog>
 
       <ConfirmDialog

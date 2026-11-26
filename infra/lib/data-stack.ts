@@ -86,7 +86,7 @@ export class DataStack extends Stack {
     this.projects = make('Projects', string('id'));
     this.finishes = make('Finishes', string('id'));
     this.services = make('Services', string('id'));
-    // Filas `PUBLIC` y `MAIL`.
+    // Filas `PUBLIC`, `MAIL` y `QUOTING`.
     this.settings = make('Settings', string('key'));
     // pk = `ENTITY#<tipo>#<id>`, sk = marca de tiempo ISO.
     this.auditLog = make('AuditLog', string('pk'), string('sk'));

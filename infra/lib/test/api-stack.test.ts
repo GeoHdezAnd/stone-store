@@ -1023,9 +1023,10 @@ describe('ApiStack: Lambda AdminSettings', () => {
       else throw new Error(`sentencia sobre una tabla inesperada: ${String(tabla)}`);
     }
 
-    // Defensa en profundidad: solo las filas PUBLIC y MAIL, como en AdminPublish y AdminQuotes.
+    // Defensa en profundidad: solo las tres filas conocidas (PUBLIC, MAIL y QUOTING, el IVA por
+    // defecto). Este es el ÚNICO rol que puede leer o escribir la fila QUOTING.
     const SOLO_FILAS_CONOCIDAS = {
-      'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC', 'MAIL'] },
+      'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC', 'MAIL', 'QUOTING'] },
     };
     // Lectura: SOLO GetItem (sin Scan, BatchGetItem ni Query), limitada a esas dos filas.
     expect(lectura).toHaveLength(1);
@@ -1265,6 +1266,8 @@ describe('ApiStack: Lambda AdminPublish', () => {
     expect(settings[0]!['Condition']).toEqual({
       'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC'] },
     });
+    // La fila QUOTING (IVA por defecto) tampoco: no debe poder publicarse.
+    expect(JSON.stringify(settings[0])).not.toContain('QUOTING');
   });
 
   it('IAM DynamoDB EXACTA: Publications lee con GetItem/BatchGetItem y escribe PutItem solo en transacción', () => {
@@ -1761,6 +1764,8 @@ describe('ApiStack: AdminQuotes envía cotizaciones (3.3b)', () => {
     expect(deSettings[0]!['Condition']).toEqual({
       'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC', 'MAIL'] },
     });
+    // El IVA por defecto (fila QUOTING) solo lo preselecciona el dashboard: AdminQuotes no la lee.
+    expect(JSON.stringify(deSettings[0])).not.toContain('QUOTING');
   });
 
   it('sin identidad SES ni emulador: sin transporte, sin permisos de SES (la ruta responde mail_not_configured)', () => {
@@ -2060,6 +2065,7 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
       'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['PUBLIC'] },
     });
     expect(JSON.stringify(st[0])).not.toContain('MAIL');
+    expect(JSON.stringify(st[0])).not.toContain('QUOTING');
   });
 
   it('sin comodines ni acciones peligrosas; fuera de DynamoDB solo hay logs y la ruta de Location (sin SES, SSM ni S3 por defecto)', () => {

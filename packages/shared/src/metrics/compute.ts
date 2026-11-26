@@ -26,8 +26,8 @@ import {
 //   «pendientes» del tiempo de respuesta y `overdueCount` salen de ese mismo conjunto. «Por atender»
 //   sigue siendo solo nueva + en revisión.
 // - Huso `America/Mexico_City` (ver time.ts); semana desde el lunes; mes calendario local.
-// - Importes en MXN tomados de `finalQuote.total`. Mientras `iva` sea `null` (CLAUDE.md 5.5) es el
-//   importe SIN IVA. Si la solicitud no tiene `finalQuote` NO se inventa un importe: cuenta en el
+// - Importes en MXN tomados de `finalQuote.total`: piedra + IVA (solo sobre la piedra, si lo hay) +
+//   flete, es decir el importe CON IVA y flete. Si la solicitud no tiene `finalQuote` NO se inventa un importe: cuenta en el
 //   conteo pero se anota en `withoutAmount` (no se usa `freight.estimadoMax`, que es solo flete).
 // - Las filas con `ejemplo: true` SÍ cuentan.
 

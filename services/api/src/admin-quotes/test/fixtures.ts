@@ -1,5 +1,5 @@
 // Datos de EJEMPLO para las pruebas (solo soporte de tests; no se empaqueta en la Lambda).
-import { computeFinalQuote, type Quote } from '@canteras/shared';
+import { computeFinalQuote, type IvaPct, type Quote } from '@canteras/shared';
 
 export const ID_A = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 export const ID_B = '01ARZ3NDEKTSV4RRFFQ69G5FAW';
@@ -48,7 +48,9 @@ export const PRICES = {
   ],
   fleteFinal: 1500,
 };
-// 10 × 120.50 + 3 × 300 = 2105.00 ; total = 3605.00
+// 10 × 120.50 + 3 × 300 = 2105.00 (piedra); sin IVA, total = 2105.00 + 1500.00 = 3605.00
+// Con 16 %: IVA 336.80 (solo sobre la piedra), total = 2105.00 + 336.80 + 1500.00 = 3941.80
+// Con 8 %: IVA 168.40, total = 3773.40
 
 export const PUBLIC_ROW = {
   key: 'PUBLIC',
@@ -68,7 +70,7 @@ export const MAIL_ROW = {
 };
 
 /** Solicitud `cotizada` con su cotización final calculada (PRICES). */
-export function quotedQuote(over: Partial<Quote> = {}): Quote {
+export function quotedQuote(over: Partial<Quote> = {}, ivaPct: IvaPct = null): Quote {
   const base = quote();
   return quote({
     status: 'cotizada',
@@ -77,6 +79,7 @@ export function quotedQuote(over: Partial<Quote> = {}): Quote {
       prices: PRICES.items,
       fleteFinal: PRICES.fleteFinal,
       vigenciaDias: 15,
+      ivaPct,
     }),
     ...over,
   });

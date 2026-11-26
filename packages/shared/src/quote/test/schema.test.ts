@@ -132,6 +132,30 @@ describe('patchBodySchema', () => {
       }).success,
     ).toBe(false);
   });
+  it('ivaPct: solo null, 8 o 16 (enum cerrado); ausente es válido', () => {
+    const ok = (ivaPct: unknown) =>
+      patchBodySchema.safeParse({ finalQuote: { ...fq, ivaPct }, rev: 1 }).success;
+    expect(ok(null)).toBe(true);
+    expect(ok(8)).toBe(true);
+    expect(ok(16)).toBe(true);
+    expect(patchBodySchema.safeParse({ finalQuote: fq, rev: 1 }).success).toBe(true);
+    for (const v of [7, 0, 16.0001, 15, 100, -16, '16', true, Number.NaN]) {
+      expect(ok(v), String(v)).toBe(false);
+    }
+  });
+  it('el cliente NUNCA envía iva ni total junto con ivaPct', () => {
+    for (const extra of [{ iva: 160 }, { total: 1160 }, { subtotal: 1000 }]) {
+      expect(
+        patchBodySchema.safeParse({ finalQuote: { ...fq, ivaPct: 16, ...extra }, rev: 1 }).success,
+      ).toBe(false);
+    }
+  });
+  it('__proto__ dentro del finalQuote se rechaza (strict)', () => {
+    const body = JSON.parse(
+      '{"rev":1,"finalQuote":{"items":[{"stoneId":"a","precioUnitario":1}],"fleteFinal":0,"__proto__":{"ivaPct":16}}}',
+    );
+    expect(patchBodySchema.safeParse(body).success).toBe(false);
+  });
   it('flete negativo, precio negativo o duplicado se rechazan', () => {
     expect(
       patchBodySchema.safeParse({ finalQuote: { ...fq, fleteFinal: -1 }, rev: 1 }).success,
@@ -146,6 +170,18 @@ describe('patchBodySchema', () => {
     expect(
       patchBodySchema.safeParse({ finalQuote: { ...fq, items: [dup, dup] }, rev: 1 }).success,
     ).toBe(false);
+  });
+});
+
+describe('finalQuoteSchema.ivaPct (guardado)', () => {
+  it('acepta null, 8 y 16; rechaza 7, 0 y decimales raros', () => {
+    const q = sampleQuote();
+    const withPct = (ivaPct: unknown) =>
+      quoteSchema.safeParse({ ...q, finalQuote: { ...q.finalQuote, ivaPct } }).success;
+    expect(withPct(null)).toBe(true);
+    expect(withPct(8)).toBe(true);
+    expect(withPct(16)).toBe(true);
+    for (const v of [7, 0, 16.5, 100, '16']) expect(withPct(v), String(v)).toBe(false);
   });
 });
 

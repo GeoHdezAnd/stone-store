@@ -17,7 +17,7 @@ export class MemoryQuoteRepository implements QuoteRepository {
   readonly calls: string[] = [];
   readonly audits: AuditEntry[] = [];
   readonly rows = new Map<string, StoredQuote>();
-  readonly settings = new Map<'PUBLIC' | 'MAIL', Record<string, unknown>>();
+  readonly settings = new Map<'PUBLIC' | 'MAIL' | 'QUOTING', Record<string, unknown>>();
   lastList: ListQuery | null = null;
   /** Se ejecuta justo antes de aplicar una escritura (simula que otro escribió antes). */
   onBeforeWrite: ((writeNumber: number) => void) | null = null;
