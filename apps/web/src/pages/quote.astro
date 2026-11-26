@@ -201,19 +201,6 @@ const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
             </div>
           </section>
 
-          <!-- Estimado de flete: se muestra solo con la API configurada (lo activa el script). -->
-          <section
-            class="quote-form__section"
-            aria-labelledby="freight-title"
-            data-freight-section
-            hidden
-          >
-            <h2 id="freight-title" class="label">
-              Estimado de flete
-            </h2>
-            <div class="freight" data-freight aria-live="polite" aria-atomic="true"></div>
-          </section>
-
           <!-- Honeypot: una persona nunca lo ve ni lo llena; un bot sí. -->
           <div class="hp" aria-hidden="true">
             <label for="f-website">No llenes este campo</label>
@@ -253,8 +240,8 @@ const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
             </div>
 
             <p class="note">
-              El estimado de flete se calcula al cotizar y está sujeto a confirmación. No recabamos
-              precios ni datos de pago en este sitio.
+              No recabamos precios ni datos de pago en este sitio. El flete se confirma en la
+              cotización.
             </p>
 
             <div class="btn-row">

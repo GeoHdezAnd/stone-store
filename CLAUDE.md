@@ -25,12 +25,12 @@ Idioma del sitio y de los textos: **español de México**. Moneda: **MXN**.
 6. Todo desplegado en AWS, definido como código, con costo cercano a cero con poco tráfico.
 
 ### Fuera de alcance en v1 (no construir todavía)
+- Reportes exportables avanzados / BI (basta con métricas simples y exportar CSV).
 - Pago en línea (Mercado Pago/Stripe) y pedidos.
-- Cuentas de cliente / login de clientes.
-- Inventario en tiempo real.
 - Automatización de WhatsApp (solo un enlace `wa.me`).
 - Roles complejos en el dashboard (en v1 solo `owner` y, opcional, `staff`).
-- Reportes exportables avanzados / BI (basta con métricas simples y exportar CSV).
+- Inventario en tiempo real.
+
 
 ## 3. Diseño existente (fuente de verdad visual)
 
