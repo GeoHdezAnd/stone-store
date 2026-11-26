@@ -17,7 +17,6 @@ export function stone(over: Record<string, unknown> = {}): CatalogItem {
     existencia: 'En patio',
     entregaDias: 7,
     vendidaPor: ['m2'],
-    pesoKgPorM2PorCm: null,
     pesoKgPorPieza: null,
     densidadKgM3: 2200,
     fotos: [],

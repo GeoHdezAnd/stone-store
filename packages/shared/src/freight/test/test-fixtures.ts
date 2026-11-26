@@ -17,7 +17,6 @@ const baseStone = {
   existencia: 'En patio',
   entregaDias: 7,
   vendidaPor: ['m2', 'pieza', 'tonelada'],
-  pesoKgPorM2PorCm: 22,
   pesoKgPorPieza: 35,
   densidadKgM3: 2200,
   fotos: [],
@@ -36,7 +35,6 @@ export const caliza = makeStone({
   espesoresCm: [2, 3, 5],
   vendidaPor: ['m2', 'tonelada'],
   pesoKgPorPieza: null,
-  pesoKgPorM2PorCm: null,
   densidadKgM3: 2400,
 });
 export const inactiva = makeStone({ id: 'travertino', nombre: 'Travertino', activa: false });

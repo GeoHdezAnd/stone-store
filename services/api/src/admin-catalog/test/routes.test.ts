@@ -136,6 +136,17 @@ describe('crear (POST)', () => {
     expect(r.json).toEqual({ error: 'already_exists' });
   });
 
+  it('una piedra con pesoKgPorM2PorCm (campo retirado) da 422 validation_error', async () => {
+    const { call } = setup();
+    const r = await call({
+      method: 'POST',
+      path: '/admin/stones',
+      body: stone({ pesoKgPorM2PorCm: 22 }),
+    });
+    expect(r.status).toBe(422);
+    expect(r.json.error).toBe('validation_error');
+  });
+
   it('campos extra dan 422 validation_error y no se reproduce el valor enviado', async () => {
     const { repo, call } = setup();
     const r = await call({

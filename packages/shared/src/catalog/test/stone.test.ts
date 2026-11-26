@@ -17,7 +17,6 @@ const valido = {
   existencia: 'En patio, San Salvador el Seco',
   entregaDias: 7,
   vendidaPor: ['m2', 'pieza', 'tonelada'],
-  pesoKgPorM2PorCm: 22,
   pesoKgPorPieza: 35,
   densidadKgM3: 2200,
   fotos: ['stones/arenisca/1.jpg'],
@@ -38,7 +37,6 @@ describe('stoneSchema', () => {
       stoneSchema.safeParse({
         ...valido,
         vendidaPor: ['m2', 'tonelada'],
-        pesoKgPorM2PorCm: null,
         pesoKgPorPieza: null,
       }).success,
     ).toBe(true);
@@ -53,6 +51,9 @@ describe('stoneSchema', () => {
 
   it('rechaza claves extra', () => {
     expect(falla({ precio: 100 })).toBe(true);
+    // Campo retirado: la densidad es la única fuente de verdad del peso por m².
+    expect(falla({ pesoKgPorM2PorCm: 22 })).toBe(true);
+    expect(falla({ pesoKgPorM2PorCm: null })).toBe(true);
   });
 
   it('respeta los límites de longitud y de listas', () => {
@@ -73,7 +74,6 @@ describe('stoneSchema', () => {
     expect(falla({ densidadKgM3: 499 })).toBe(true);
     expect(falla({ densidadKgM3: 5001 })).toBe(true);
     expect(falla({ densidadKgM3: Number.POSITIVE_INFINITY })).toBe(true);
-    expect(falla({ pesoKgPorM2PorCm: 0 })).toBe(true);
     expect(falla({ pesoKgPorPieza: -3 })).toBe(true);
     expect(falla({ espesoresCm: [0] })).toBe(true);
     expect(falla({ espesoresCm: [101] })).toBe(true);

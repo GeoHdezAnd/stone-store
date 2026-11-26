@@ -28,9 +28,8 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 /**
  * Peso total en kg, con merma incluida, redondeado a 2 decimales.
  *
- * - m²: densidadKgM3 × (espesorCm / 100) × m². PRECEDENCIA: densidad primero. El schema de la
- *   piedra exige siempre `densidadKgM3` y además trae `pesoKgPorM2PorCm` EDITABLE; ese campo se
- *   IGNORA aquí (editarlo en el dashboard no cambia el flete). Ver docs/siguiente-sesion.md.
+ * - m²: densidadKgM3 × (espesorCm / 100) × m². El peso por m² sale SOLO de la densidad
+ *   (`densidadKgM3`, obligatoria en el esquema de la piedra): es la única fuente de verdad.
  * - pieza: pesoKgPorPieza × n (n entero).
  * - tonelada: n × 1000.
  * - Luego se suma `mermaPct` % (merma/tarima/embalaje).

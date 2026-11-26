@@ -43,8 +43,8 @@ describe('computeWeightKg', () => {
     ).toBe(23100);
   });
 
-  it('usa la densidad aunque la piedra traiga pesoKgPorM2PorCm (precedencia: densidad primero)', () => {
-    const rara = makeStone({ id: 'rara', pesoKgPorM2PorCm: 999, densidadKgM3: 2000 });
+  it('el peso por m² sale solo de la densidad', () => {
+    const rara = makeStone({ id: 'rara', densidadKgM3: 2000 });
     expect(
       computeWeightKg([{ stoneId: 'rara', cantidad: 1, unidad: 'm2', espesorCm: 5 }], [rara], cfg),
     ).toBe(100);

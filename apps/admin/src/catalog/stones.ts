@@ -112,13 +112,6 @@ const sale: FormSection<Stone> = {
       hint: weightHint,
     }),
     f({
-      name: 'pesoKgPorM2PorCm',
-      label: 'Peso por m² por cm (kg)',
-      kind: 'nullable-number',
-      hint: 'Opcional.',
-      visibleWhen: sells('m2'),
-    }),
-    f({
       name: 'pesoKgPorPieza',
       label: 'Peso por pieza (kg)',
       kind: 'nullable-number',
@@ -192,7 +185,6 @@ export const stonesConfig: CatalogConfig<Stone> = {
     existencia: '',
     entregaDias: 0,
     vendidaPor: [],
-    pesoKgPorM2PorCm: null,
     pesoKgPorPieza: null,
     densidadKgM3: 0,
     fotos: [],

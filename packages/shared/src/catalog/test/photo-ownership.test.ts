@@ -20,7 +20,6 @@ const stone = {
   existencia: 'En patio',
   entregaDias: 7,
   vendidaPor: ['m2'],
-  pesoKgPorM2PorCm: 22,
   pesoKgPorPieza: null,
   densidadKgM3: 2200,
   fotos: [],

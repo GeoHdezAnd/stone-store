@@ -39,7 +39,6 @@ const stone = (over: Record<string, unknown> = {}): Stone =>
     existencia: 'En patio',
     entregaDias: 7,
     vendidaPor: ['m2'],
-    pesoKgPorM2PorCm: null,
     pesoKgPorPieza: null,
     densidadKgM3: 2200,
     fotos: [],
@@ -240,6 +239,14 @@ describe('buildCatalogDocument: configuración', () => {
     const doc = build();
     expect(catalogDocumentSchema.safeParse({ ...doc, extra: 1 }).success).toBe(false);
     expect(catalogDocumentSchema.safeParse({ ...doc, version: 'CURRENT' }).success).toBe(false);
+    // Campo retirado de la piedra: un catalog.json que aún lo traiga se rechaza.
+    const doc2 = build({ stones: [stone({ id: 'a' })] });
+    const conCampoViejo = {
+      ...doc2,
+      stones: doc2.stones.map((s) => ({ ...s, pesoKgPorM2PorCm: 22 })),
+    };
+    expect(doc2.stones.length).toBeGreaterThan(0);
+    expect(catalogDocumentSchema.safeParse(conCampoViejo).success).toBe(false);
     expect(CATALOG_VERSION_PATTERN.test('v0001')).toBe(true);
     expect(CATALOG_VERSION_PATTERN.test('v1')).toBe(false);
     expect(CATALOG_VERSION_PATTERN.test('v00012')).toBe(true);
@@ -259,5 +266,21 @@ describe('canonicalJson', () => {
 
   it('omite undefined y conserva null y el orden de los arreglos', () => {
     expect(canonicalJson({ a: undefined, b: null, c: [2, 1] })).toBe('{"b":null,"c":[2,1]}');
+  });
+});
+
+describe('catalogDocumentSchema: la fila QUOTING nunca se publica', () => {
+  it('rechaza un `quoting` (o `ivaPctDefault`) dentro de settings', () => {
+    const doc = build();
+    expect(catalogDocumentSchema.safeParse(doc).success).toBe(true);
+    expect(
+      catalogDocumentSchema.safeParse({
+        ...doc,
+        settings: { ...doc.settings, ivaPctDefault: 16 },
+      }).success,
+    ).toBe(false);
+    expect(
+      catalogDocumentSchema.safeParse({ ...doc, quoting: { ivaPctDefault: 16 } }).success,
+    ).toBe(false);
   });
 });
