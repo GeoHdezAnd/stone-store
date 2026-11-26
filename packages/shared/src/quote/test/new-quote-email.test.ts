@@ -76,13 +76,21 @@ describe('buildCustomerConfirmationEmail', () => {
     expect(m.html).toContain('Dirección: Dirección de ejemplo');
   });
 
-  it('con estimado de flete en la solicitud lo muestra como estimado sujeto a confirmación', () => {
+  it('aunque la solicitud traiga estimado de flete, el cliente NUNCA lo ve (lo revisa el dueño)', () => {
     const conEstimado = nueva({ freight: sampleQuote().freight });
+    expect(conEstimado.freight).toBeDefined();
     const mm = buildCustomerConfirmationEmail({ quote: conEstimado, publicSettings });
-    expect(mm.text).toMatch(/Estimado de flete: \$1,400\.00 a \$1,700\.00 MXN/);
-    expect(mm.text).toMatch(/sujeto a confirmación/i);
-    expect(mm.html).toMatch(/Estimado de flete: \$1,400\.00 a \$1,700\.00 MXN/);
-    expect(mm.text).not.toMatch(/no incluye importes/);
+    for (const parte of [mm.text, mm.html, mm.subject]) {
+      expect(parte).not.toMatch(/estimado/i);
+      expect(parte).not.toMatch(/1,400|1,700|1400|1700/);
+      expect(parte).not.toMatch(/\$\s?\d/);
+      expect(parte).not.toMatch(/MXN/);
+    }
+    expect(mm.text).toMatch(/este correo no incluye importes/);
+    // El correo es idéntico con o sin estimado: no filtra si el cálculo existió.
+    const sinEstimado = buildCustomerConfirmationEmail({ quote: nueva(), publicSettings });
+    expect(mm.text).toBe(sinEstimado.text);
+    expect(mm.html).toBe(sinEstimado.html);
   });
 
   it('promete respuesta en menos de 48 h y aclara que precios y flete se confirman en la cotización', () => {

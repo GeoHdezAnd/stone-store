@@ -44,13 +44,12 @@ function detailLink(adminBaseUrl: string | undefined, quoteId: string): string |
   return `${base}/quotes/${quoteId}`;
 }
 
-const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
-
 /**
  * Confirmación al cliente. El destinatario lo escribe cualquiera en un formulario público, así que
  * este correo es un posible relevo de phishing: NO lleva NINGÚN texto libre del cliente (ni nombre,
- * ni lugar, uso, notas o teléfono). Solo folio, piedras con el nombre del catálogo, cantidades, el
- * estimado de flete si existe y los datos del patio (todo lo decide el servidor).
+ * ni lugar, uso, notas o teléfono). Solo folio, piedras con el nombre del catálogo, cantidades y los
+ * datos del patio (todo lo decide el servidor). Tampoco lleva importes ni el estimado de flete: el
+ * cliente no lo ve (decisión del dueño); lo revisa y ajusta el dueño en el dashboard antes de cotizar.
  */
 export function buildCustomerConfirmationEmail(input: {
   quote: Quote;
@@ -67,14 +66,8 @@ export function buildCustomerConfirmationEmail(input: {
     `Recibimos una solicitud de cotización con el folio ${quote.folio}. Guárdalo para cualquier consulta.`,
     'Piedras solicitadas:',
   ];
-  const estimate =
-    quote.freight === undefined
-      ? null
-      : `Estimado de flete: ${money.format(quote.freight.estimadoMin)} a ${money.format(quote.freight.estimadoMax)} MXN (estimado sujeto a confirmación).`;
   const promesa =
-    estimate === null
-      ? 'Un asesor te responderá en menos de 48 horas. Los precios y el flete se confirman en la cotización que recibirás; este correo no incluye importes.'
-      : 'Un asesor te responderá en menos de 48 horas. Los precios y el flete se confirman en la cotización que recibirás.';
+    'Un asesor te responderá en menos de 48 horas. Los precios y el flete se confirman en la cotización que recibirás; este correo no incluye importes.';
   const footerLines = [
     `— ${oneLine(pub.nombrePatio)}`,
     `Dirección: ${oneLine(pub.direccion)}`,
@@ -90,7 +83,6 @@ export function buildCustomerConfirmationEmail(input: {
     body[1],
     ...lines.map((l) => `- ${l}`),
     '',
-    ...(estimate === null ? [] : [estimate, '']),
     promesa,
     '',
     ...footerLines,
@@ -103,7 +95,6 @@ export function buildCustomerConfirmationEmail(input: {
       `<p>${escapeHtml(body[0] as string)}</p>`,
       `<p>${escapeHtml(body[1] as string)}</p>`,
       `<ul>${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`,
-      ...(estimate === null ? [] : [`<p>${escapeHtml(estimate)}</p>`]),
       `<p>${escapeHtml(promesa)}</p>`,
       `<p>${footerLines.map((l) => escapeHtml(l)).join('<br>\n')}</p>`,
     ].join('\n'),

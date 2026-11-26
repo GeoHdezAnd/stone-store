@@ -310,8 +310,8 @@ describe('estimado de flete: costo y abuso (misma validación y mismo caché)', 
   });
 });
 
-describe('estimado de flete en el correo de confirmación', () => {
-  it('con estimado, el correo al cliente lo incluye con «sujeto a confirmación»; sin él, no', async () => {
+describe('estimado de flete: el cliente no lo ve en ningún correo', () => {
+  it('se guarda para el dueño, pero ni la confirmación al cliente ni el aviso lo incluyen', async () => {
     const sent: { to?: unknown; text?: string; html?: string }[] = [];
     const mailer = {
       send: async (m: never) => {
@@ -321,15 +321,17 @@ describe('estimado de flete en el correo de confirmación', () => {
     };
     const con = setup({ mailer });
     await con.call(validBody());
+    expect('freight' in stored(con.repo)).toBe(true);
+    expect(sent.length).toBeGreaterThan(0);
     const textos = sent.map((m) => `${m.text ?? ''}${m.html ?? ''}`).join('\n');
-    expect(textos).toContain('Estimado de flete');
-    expect(textos).toContain('sujeto a confirmación');
+    expect(textos).not.toMatch(/estimado de flete/i);
+    expect(textos).not.toContain('sujeto a confirmación');
 
     sent.length = 0;
     const sin = setup({ mailer, routes: undefined });
     await sin.call(validBody());
-    expect(sent.map((m) => `${m.text ?? ''}${m.html ?? ''}`).join('\n')).not.toContain(
-      'Estimado de flete',
+    expect(sent.map((m) => `${m.text ?? ''}${m.html ?? ''}`).join('\n')).not.toMatch(
+      /estimado de flete/i,
     );
   });
 });
