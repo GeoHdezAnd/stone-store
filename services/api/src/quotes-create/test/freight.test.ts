@@ -1,6 +1,6 @@
 import { generateUlid, quoteSchema, stripStorageKeys } from '@canteras/shared';
 import { describe, expect, it } from 'vitest';
-import { FakeRouteProvider } from '../../freight-estimate/test/memory-repository';
+import { FakeRouteProvider } from './fake-route-provider';
 import { NEGATIVE_ROUTE_CACHE_TTL_SECONDS, ROUTE_CACHE_TTL_DAYS } from '../../lib/freight-quote';
 import { NO_ROUTE_REASON, RouteProviderError, type RouteProvider } from '../../lib/route-provider';
 import { FakeCaptchaVerifier } from '../captcha';

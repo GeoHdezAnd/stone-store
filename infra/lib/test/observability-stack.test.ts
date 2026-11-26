@@ -88,7 +88,6 @@ const FUNCIONES = [
   'AdminQuotes',
   'AdminMetrics',
   'QuotesCreate',
-  'FreightEstimate',
 ];
 
 const ACCION_SNS = [{ Ref: Match.stringLikeRegexp('^Alerts') }];
@@ -206,10 +205,10 @@ describe('ObservabilityStack: 5xx del HttpApi', () => {
 });
 
 describe('ObservabilityStack: throttles de las Lambdas públicas', () => {
-  it.each(['QuotesCreate', 'FreightEstimate'])('alarma de Throttles para %s (>= 1)', (nombre) => {
+  it('alarma de Throttles para QuotesCreate (>= 1)', () => {
     const { template } = build({ alertEmail: EMAIL });
     template.hasResourceProperties('AWS::CloudWatch::Alarm', {
-      AlarmName: `canteras-dev-${nombre}-throttles`,
+      AlarmName: 'canteras-dev-QuotesCreate-throttles',
       Namespace: 'AWS/Lambda',
       MetricName: 'Throttles',
       Statistic: 'Sum',
@@ -227,7 +226,7 @@ describe('ObservabilityStack: throttles de las Lambdas públicas', () => {
     const n = Object.values(template.findResources('AWS::CloudWatch::Alarm')).filter(
       (a) => a.Properties.MetricName === 'Throttles',
     ).length;
-    expect(n).toBe(2);
+    expect(n).toBe(1);
   });
 });
 
@@ -322,8 +321,8 @@ describe('ObservabilityStack: todas las alarmas notifican al tema', () => {
     const { template } = build({ alertEmail: EMAIL });
     const alarmas = Object.values(template.findResources('AWS::CloudWatch::Alarm'));
     const topicId = Object.keys(template.findResources('AWS::SNS::Topic'))[0];
-    // 11 errores + 5xx + 2 throttles + duración + folio + 429
-    expect(alarmas).toHaveLength(17);
+    // 10 errores + 5xx + 1 throttles + duración + folio + 429
+    expect(alarmas).toHaveLength(15);
     for (const a of alarmas) {
       expect(a.Properties.TreatMissingData).toBe('notBreaching');
       expect(a.Properties.AlarmActions).toEqual([{ Ref: topicId }]);
@@ -412,7 +411,7 @@ describe('ObservabilityStack: Lambda de variantes de imagen (fase 6.3)', () => {
     });
   });
 
-  it('sin ella el total de alarmas no cambia (17 + 2 al incluirla: errores y throttles)', () => {
+  it('sin ella el total de alarmas no cambia (15 + 2 al incluirla: errores y throttles)', () => {
     const sin = build({ emulated: true }).template.findResources('AWS::CloudWatch::Alarm');
     const con = build({ emulated: true, withMediaVariants: true }).template.findResources(
       'AWS::CloudWatch::Alarm',

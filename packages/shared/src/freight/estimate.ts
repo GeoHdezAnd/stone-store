@@ -21,7 +21,7 @@ interface FreightEstimateBase {
 }
 
 /**
- * - Flujo público (`POST /freight/estimate`, `POST /quotes`): `codigoPostal` OBLIGATORIO; se valida
+ * - Flujo público (`POST /quotes`): `codigoPostal` OBLIGATORIO; se valida
  *   formato y zona de cobertura.
  * - Simulador del dashboard: `skipZoneCheck: true` (bandera EXPLÍCITA) permite omitir el CP y
  *   salta SOLO la verificación de zona. Si aun así se da un CP, se valida su formato. `maxKm`

@@ -14,3 +14,6 @@ coverage
 docs/
 # Configuración local del dashboard (valores de tu entorno; ver config.example.json)
 apps/admin/public/config.json
+
+# Salida temporal de la skill stone-images
+.generated/

@@ -6,7 +6,7 @@ export interface QuotesCreateConfig {
   settings: string;
   /** Coordenadas de cada CP (destino del estimado de flete). */
   postalCodes: string;
-  /** Caché de distancias por CP (misma tabla que usa `freight-estimate`). */
+  /** Caché de distancias por CP (solo la usa `quotes-create`). */
   routeCache: string;
   /** Origen del dashboard para el enlace del aviso al dueño. Sin él, el aviso va sin enlace. */
   adminBaseUrl?: string;

@@ -23,7 +23,7 @@ import type { DeployEnv } from './config.js';
  * Servicios nuevos (el dueño está aprendiendo AWS):
  * - CloudWatch Alarms: vigilan una métrica (p. ej. errores de una Lambda) y cambian a ALARM cuando
  *   cruza un umbral. Cuestan ~USD 0.10 por alarma al mes; las primeras 10 son gratis en la capa
- *   gratuita (aquí hay 17: ~USD 0.70 al mes).
+ *   gratuita (aquí hay 15: ~USD 0.50 al mes).
  * - Metric filters: leen los logs de un LogGroup y cuentan las líneas que coinciden con un patrón;
  *   el conteo se publica como métrica personalizada (namespace `Canteras`). El filtro es gratis; la
  *   métrica personalizada cuesta ~USD 0.30 al mes cada una (2 métricas).
@@ -82,7 +82,7 @@ export const RATE_LIMITED_WINDOW_MINUTES = 15;
 export const BUDGET_LIMITS_USD = [5, 10] as const;
 
 /** Lambdas públicas (sin authorizer): son las que importa vigilar por throttling. */
-const PUBLIC_FUNCTIONS = ['QuotesCreate', 'FreightEstimate'] as const;
+const PUBLIC_FUNCTIONS = ['QuotesCreate'] as const;
 
 const EMAIL_RE = /^[^\s@,;]{1,64}@[^\s@,;]{1,255}\.[^\s@,;.]{2,}$/;
 

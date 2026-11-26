@@ -26,7 +26,7 @@ const captcha = createCaptchaVerifier(config, { ssm: () => new SSMClient({}) });
 
 // Proveedor de distancias del estimado de flete: `location` (AWS real) o `haversine` (emulador). Sin
 // `ROUTE_PROVIDER` no hay estimado (la solicitud se guarda sin `freight`); un valor inválido falla
-// al arrancar, igual que en `freight-estimate`.
+// al arrancar.
 const routes =
   (process.env['ROUTE_PROVIDER'] ?? '') === ''
     ? undefined

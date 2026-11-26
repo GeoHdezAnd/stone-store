@@ -13,7 +13,21 @@ export default defineConfig({
   // `/_aws/...` en este servidor y Vite lo reenvía a Floci (igual que en `apps/admin`).
   vite: {
     server: {
-      proxy: { '/_aws': { target: 'http://localhost:4566', changeOrigin: true } },
+      proxy: {
+        '/_aws': { target: 'http://localhost:4566', changeOrigin: true },
+        // Solo en desarrollo y solo si defines MEDIA_DEV_BUCKET: sirve las fotos del bucket de media
+        // de Floci en `/media/...` (en AWS real las sirve CloudFront con `PUBLIC_MEDIA_BASE_URL`).
+        ...(process.env['MEDIA_DEV_BUCKET']
+          ? {
+              '/media': {
+                target: 'http://localhost:4566',
+                changeOrigin: true,
+                rewrite: (p: string) =>
+                  `/${process.env['MEDIA_DEV_BUCKET']}${p.slice('/media'.length)}`,
+              },
+            }
+          : {}),
+      },
     },
   },
 });

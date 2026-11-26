@@ -13,8 +13,8 @@ import type { Logger } from './logger';
 import { NO_ROUTE_REASON, RouteProviderError, type RouteProvider } from './route-provider';
 
 /**
- * Cálculo del estimado de flete que comparten `POST /freight/estimate` y `POST /quotes`: así las dos
- * rutas dan SIEMPRE el mismo resultado, con la misma caché de rutas y las mismas defensas de costo.
+ * Cálculo del estimado de flete que `POST /quotes` guarda en la solicitud (la lógica de dominio es la
+ * misma de `packages/shared` que usa el simulador del dashboard), con caché de rutas y defensas de costo.
  * Orden fijo, de lo más barato a lo más caro y SIN gastar la ruta hasta que lo demás es válido:
  *   CP en `PostalCodes`, validación completa del pedido (con distancia 0: zona, piedras, unidades,
  *   peso y viajes), caché de ruta o proveedor, cálculo final. El peso lo calcula SIEMPRE el servidor.

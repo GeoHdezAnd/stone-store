@@ -43,7 +43,7 @@ const postalCode = z
   .string({ error: 'El código postal debe ser texto' })
   .regex(/^\d{5}$/, 'El código postal debe tener 5 dígitos');
 
-/** Cuerpo de `POST /freight/estimate`. No acepta `distanciaKm`: la calcula el servidor. */
+/** Cuerpo de una solicitud de estimado (ya no hay ruta pública que lo reciba; lo usa solo el dominio). No acepta `distanciaKm`: la calcula el servidor. */
 export const freightEstimateRequestSchema = z.strictObject(
   { codigoPostal: postalCode, items: itemsSchema },
   objectErrors('La solicitud', 'válida'),
@@ -73,7 +73,7 @@ function parseWith<T>(schema: z.ZodType<T>, raw: unknown): ParseResult<T> {
   return { ok: false, errors };
 }
 
-/** Valida el cuerpo de `POST /freight/estimate`. Nunca lanza: devuelve errores en español (→ 400). */
+/** Valida una solicitud de estimado de flete. Nunca lanza: devuelve errores en español (→ 400). */
 export const parseFreightEstimateRequest = (raw: unknown): ParseResult<FreightEstimateRequest> =>
   parseWith(freightEstimateRequestSchema, raw);
 

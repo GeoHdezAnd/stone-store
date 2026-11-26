@@ -152,7 +152,7 @@ export function createQuotesCreateHandler(deps: QuotesCreateDeps) {
 
   /**
    * Estimado de flete RECALCULADO aquí (jamás el del navegador), con la misma tarifa activa, la misma
-   * tabla de CP y la misma caché de rutas que `POST /freight/estimate`. Best-effort: ante CUALQUIER
+   * tabla de CP y la misma caché de rutas que el simulador del dashboard. Best-effort: ante CUALQUIER
    * fallo (CP ausente o fuera de zona, proveedor caído o lento, base) devuelve `undefined` y la
    * solicitud se guarda sin `freight` para que el dueño la atienda a mano. Solo se registra el tipo
    * de fallo y los 2 primeros dígitos del CP (nunca datos del cliente).
