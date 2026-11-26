@@ -1,26 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_ITEMS } from '../weight';
-import {
-  freightEstimateRequestSchema,
-  freightSimulateRequestSchema,
-  parseFreightEstimateRequest,
-  parseFreightSimulateRequest,
-} from '../request';
+import { freightSimulateRequestSchema, parseFreightSimulateRequest } from '../request';
 
 const item = { stoneId: 'arenisca', cantidad: 10, unidad: 'm2', espesorCm: 5 };
-const valido = { codigoPostal: '74000', items: [item] };
+const valido = { distanciaKm: 62, codigoPostal: '74000', items: [item] };
 
 function errores(r: { ok: boolean; errors?: string[] }): string[] {
   expect(r.ok).toBe(false);
   return r.errors ?? [];
 }
 
-describe('parseFreightEstimateRequest', () => {
+describe('renglones y cuerpo (itemsSchema, compartido vía el simulador)', () => {
   it('acepta una solicitud válida (espesorCm opcional)', () => {
-    const r = parseFreightEstimateRequest(valido);
+    const r = parseFreightSimulateRequest(valido);
     expect(r).toEqual({ ok: true, data: valido });
     expect(
-      parseFreightEstimateRequest({
+      parseFreightSimulateRequest({
+        distanciaKm: 1,
         codigoPostal: '74000',
         items: [{ stoneId: 'a', cantidad: 1, unidad: 'tonelada' }],
       }).ok,
@@ -29,13 +25,13 @@ describe('parseFreightEstimateRequest', () => {
 
   it('conserva __proto__ como clave propia: se rechaza como campo no permitido', () => {
     const hostil = JSON.parse(
-      '{"codigoPostal":"74000","items":[{"stoneId":"a","cantidad":1,"unidad":"pieza"}],"__proto__":{"admin":true}}',
+      '{"distanciaKm":1,"codigoPostal":"74000","items":[{"stoneId":"a","cantidad":1,"unidad":"pieza"}],"__proto__":{"admin":true}}',
     );
-    expect(errores(parseFreightEstimateRequest(hostil)).length).toBeGreaterThan(0);
+    expect(errores(parseFreightSimulateRequest(hostil)).length).toBeGreaterThan(0);
     const enItem = JSON.parse(
-      '{"codigoPostal":"74000","items":[{"stoneId":"a","cantidad":1,"unidad":"pieza","__proto__":{"x":1}}]}',
+      '{"distanciaKm":1,"codigoPostal":"74000","items":[{"stoneId":"a","cantidad":1,"unidad":"pieza","__proto__":{"x":1}}]}',
     );
-    expect(parseFreightEstimateRequest(enItem).ok).toBe(false);
+    expect(parseFreightSimulateRequest(enItem).ok).toBe(false);
   });
 
   it.each<[string, unknown]>([
@@ -47,14 +43,16 @@ describe('parseFreightEstimateRequest', () => {
     ['items: [null]', { ...valido, items: [null] }],
     ['items: {}', { ...valido, items: {} }],
     ['items: "x"', { ...valido, items: 'x' }],
-    ['sin items', { codigoPostal: '74000' }],
+    ['sin items', { distanciaKm: 62, codigoPostal: '74000' }],
     ['items vacío', { ...valido, items: [] }],
     ['demasiados items', { ...valido, items: Array.from({ length: MAX_ITEMS + 1 }, () => item) }],
     ['codigoPostal numérico', { ...valido, codigoPostal: 74000 }],
     ['codigoPostal corto', { ...valido, codigoPostal: '7400' }],
     ['codigoPostal con espacios', { ...valido, codigoPostal: ' 74000' }],
     ['codigoPostal con salto de línea', { ...valido, codigoPostal: '74000\n' }],
-    ['sin codigoPostal', { items: [item] }],
+    ['sin distanciaKm', { codigoPostal: '74000', items: [item] }],
+    ['peso que manda el cliente (pesoKg)', { ...valido, items: [{ ...item, pesoKg: 1 }] }],
+    ['peso en la raíz', { ...valido, pesoKg: 1 }],
     ['campo extra', { ...valido, extra: 1 }],
     ['campo extra en item', { ...valido, items: [{ ...item, peso: 1 }] }],
     ['cantidad 0', { ...valido, items: [{ ...item, cantidad: 0 }] }],
@@ -68,9 +66,9 @@ describe('parseFreightEstimateRequest', () => {
     ['espesorCm texto', { ...valido, items: [{ ...item, espesorCm: '5' }] }],
     ['espesorCm NaN', { ...valido, items: [{ ...item, espesorCm: Number.NaN }] }],
   ])('entrada hostil o inválida (%s) → errores de validación, nunca excepción', (_n, entrada) => {
-    let r: ReturnType<typeof parseFreightEstimateRequest> | undefined;
+    let r: ReturnType<typeof parseFreightSimulateRequest> | undefined;
     expect(() => {
-      r = parseFreightEstimateRequest(entrada);
+      r = parseFreightSimulateRequest(entrada);
     }).not.toThrow();
     const msgs = errores(r!);
     expect(msgs.length).toBeGreaterThan(0);
@@ -81,17 +79,11 @@ describe('parseFreightEstimateRequest', () => {
 
   it('el tope de items es MAX_ITEMS', () => {
     expect(
-      parseFreightEstimateRequest({
+      parseFreightSimulateRequest({
         ...valido,
         items: Array.from({ length: MAX_ITEMS }, () => item),
       }).ok,
     ).toBe(true);
-  });
-
-  it('el schema exportado rechaza distanciaKm (no la manda el navegador)', () => {
-    expect(freightEstimateRequestSchema.safeParse({ ...valido, distanciaKm: 10 }).success).toBe(
-      false,
-    );
   });
 });
 
@@ -140,13 +132,12 @@ describe('parseFreightSimulateRequest', () => {
 describe('mensajes de objeto inválido (concordancia de género)', () => {
   it('«La solicitud no es válida» para cuerpos que no son objeto', () => {
     for (const raw of [null, [], 'x', 3]) {
-      expect(errores(parseFreightEstimateRequest(raw))).toEqual(['La solicitud no es válida']);
       expect(errores(parseFreightSimulateRequest(raw))).toEqual(['La solicitud no es válida']);
     }
   });
 
   it('«Cada renglón no es válido» para un renglón que no es objeto', () => {
-    expect(errores(parseFreightEstimateRequest({ ...valido, items: ['x'] }))).toEqual([
+    expect(errores(parseFreightSimulateRequest({ ...valido, items: ['x'] }))).toEqual([
       'Cada renglón no es válido',
     ]);
   });

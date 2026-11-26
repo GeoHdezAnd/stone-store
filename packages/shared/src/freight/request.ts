@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { SOLD_BY_UNITS } from '../catalog/stone';
 import { MAX_ITEMS, MAX_ITEM_QUANTITY } from './weight';
 
-// Validación del cuerpo de las peticiones de flete (frontera con datos no confiables).
+// Validación del cuerpo del simulador de flete (frontera con datos no confiables).
 // Mensajes en español que no reproducen lo enviado. El peso NUNCA viene del navegador.
 
 /** Convierte cualquier error de zod en un mensaje en español (sin eco de datos). */
@@ -34,6 +34,7 @@ export const freightItemRequestSchema = z.strictObject(
   objectErrors('Cada renglón'),
 );
 
+/** Renglones del simulador: los usan `parseFreightSimulateRequest` y, vía este módulo, el dashboard. */
 const itemsSchema = z
   .array(freightItemRequestSchema, { error: 'Los renglones deben ser una lista' })
   .min(1, 'Agrega al menos una piedra')
@@ -42,13 +43,6 @@ const itemsSchema = z
 const postalCode = z
   .string({ error: 'El código postal debe ser texto' })
   .regex(/^\d{5}$/, 'El código postal debe tener 5 dígitos');
-
-/** Cuerpo de una solicitud de estimado (ya no hay ruta pública que lo reciba; lo usa solo el dominio). No acepta `distanciaKm`: la calcula el servidor. */
-export const freightEstimateRequestSchema = z.strictObject(
-  { codigoPostal: postalCode, items: itemsSchema },
-  objectErrors('La solicitud', 'válida'),
-);
-export type FreightEstimateRequest = z.infer<typeof freightEstimateRequestSchema>;
 
 /** Cuerpo de `POST /admin/freight/simulate`: trae `distanciaKm` y el CP es opcional. */
 export const freightSimulateRequestSchema = z.strictObject(
@@ -72,10 +66,6 @@ function parseWith<T>(schema: z.ZodType<T>, raw: unknown): ParseResult<T> {
   const errors = [...new Set(r.error.issues.map((i) => i.message))];
   return { ok: false, errors };
 }
-
-/** Valida una solicitud de estimado de flete. Nunca lanza: devuelve errores en español (→ 400). */
-export const parseFreightEstimateRequest = (raw: unknown): ParseResult<FreightEstimateRequest> =>
-  parseWith(freightEstimateRequestSchema, raw);
 
 /** Valida el cuerpo de `POST /admin/freight/simulate`. Nunca lanza. */
 export const parseFreightSimulateRequest = (raw: unknown): ParseResult<FreightSimulateRequest> =>

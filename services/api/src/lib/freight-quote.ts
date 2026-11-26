@@ -31,8 +31,9 @@ export const ROUTE_CACHE_TTL_DAYS = 90;
 export const NEGATIVE_ROUTE_CACHE_TTL_SECONDS = 3600;
 
 // Límite conocido (aceptado): la caché negativa dura 1 h, así que un CP sin ruta puede volver a
-// cobrarse hasta ~24 veces al día. El costo queda acotado por el número de CP distintos (y por el
-// throttle de la ruta), no por el número de peticiones.
+// cobrarse hasta ~24 veces al día. El costo queda acotado por el número de CP distintos, por el
+// throttle de `POST /quotes` en API Gateway (1 req/s, ráfaga 2) y por el límite diario por correo/IP
+// de QuotesCreate, no por el número de peticiones.
 
 /** Valor de `fallo` en las filas negativas de `RouteCache`. */
 const NEGATIVE_FAILURE = 'sin_ruta';
@@ -140,7 +141,7 @@ async function resolveDistance(
   }
 
   // Límite conocido (aceptado): sin candado, N peticiones simultáneas al MISMO CP sin caché hacen N
-  // llamadas de pago antes de que la primera guarde. El throttle de la ruta (5/10) lo acota.
+  // llamadas de pago antes de que la primera guarde. El throttle de `POST /quotes` (1 req/s, ráfaga 2) y el límite por correo/IP lo acotan.
   let km: number;
   try {
     km = await routes.getDistanceKm(
