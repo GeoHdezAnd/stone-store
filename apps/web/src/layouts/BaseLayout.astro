@@ -5,6 +5,7 @@ import '../styles/site.css';
 import '../styles/pages.css';
 import SiteHeader from '../components/SiteHeader.astro';
 import { loadCatalog } from '../lib/catalog-loader';
+import { visitWhatsAppUrl } from '../lib/visit';
 import { mediaVariantUrl, SHARE_WIDTH } from '../lib/media';
 
 interface Props {
@@ -78,7 +79,9 @@ const imageUrl = ogImage
             <a href="/quote/">Pedir cotización</a>
           </p>
           <p>
-            <a href="/quote/?motivo=visita">Agendar visita al patio</a>
+            <a href={visitWhatsAppUrl(settings.whatsapp)} rel="noopener">
+              Agendar visita
+            </a>
           </p>
           <p>
             <a href="/contact/">Cómo llegar</a>

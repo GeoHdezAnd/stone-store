@@ -3,6 +3,7 @@ import Photo from '../components/Photo.astro';
 import StoneCard from '../components/StoneCard.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { loadCatalog } from '../lib/catalog-loader';
+import { visitWhatsAppUrl } from '../lib/visit';
 
 const { catalog } = await loadCatalog();
 const featured = catalog.stones.slice(0, 4);
@@ -163,11 +164,13 @@ const stats = [
           <span>Te cotizamos la piedra.</span>
         </h2>
         <p class="lead">
-          Escoge la piedra frente al bloque, no en una foto. Horario del patio:{' '}
+          Escoge la piedra frente al bloque, no en una foto. Horario de atención:{' '}
           {catalog.settings.horario}.
         </p>
         <div class="btn-row">
-          <a href="/quote/?motivo=visita">Agendar visita al patio</a>
+          <a href={visitWhatsAppUrl(catalog.settings.whatsapp)} rel="noopener">
+            Agendar visita
+          </a>
         </div>
       </div>
     </section>

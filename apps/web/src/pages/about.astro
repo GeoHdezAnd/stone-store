@@ -2,6 +2,7 @@
 import Photo from '../components/Photo.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { loadCatalog } from '../lib/catalog-loader';
+import { visitWhatsAppUrl } from '../lib/visit';
 
 const { catalog } = await loadCatalog();
 
@@ -24,15 +25,15 @@ const steps = [
 
 <BaseLayout
   title="La cantera"
-  description="Del banco al patio y del patio a tu obra: cómo extraemos, labramos y entregamos la piedra."
+  description="Del banco a tu obra: cómo extraemos, labramos y entregamos la piedra."
 >
   <main id="contenido" class="container">
     <section class="page-head">
       <span class="eyebrow">La cantera</span>
-      <h1 class="page-title">Del banco al patio, y del patio a tu obra</h1>
+      <h1 class="page-title">Del banco a tu obra</h1>
       <p class="lead">
-        Somos una familia de canteros de San Salvador el Seco, Puebla. Extraemos, labramos en el
-        taller del patio y entregamos directo, sin intermediarios.
+        Somos una familia de canteros de San Salvador el Seco, Puebla. Extraemos, labramos en
+        nuestro taller y entregamos directo, sin intermediarios.
       </p>
       <p class="notice notice--example" role="note">
         <strong>Texto de ejemplo.</strong> Canteras Naturales es un negocio ficticio; esta historia
@@ -60,8 +61,8 @@ const steps = [
     </section>
     <hr class="rule" />
     <div class="page-cta">
-      <a class="btn btn-primary" href="/quote/?motivo=visita">
-        Agendar visita al patio
+      <a class="btn btn-primary" href={visitWhatsAppUrl(catalog.settings.whatsapp)} rel="noopener">
+        Agendar visita
       </a>
       <a class="btn btn-ghost" href="/contact/">
         Cómo llegar ({catalog.settings.horario})

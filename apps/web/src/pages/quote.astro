@@ -18,8 +18,8 @@ const stones = catalog.stones.map((s) => ({
   acabados: s.acabados,
 }));
 
-// «Para qué es»: las categorías de uso del catálogo y el motivo «visita» (`?motivo=visita`).
-const usos = [...Object.values(USE_CATEGORY_LABELS), 'Visita al patio'];
+// «Para qué es»: las categorías de uso del catálogo (la visita va por WhatsApp, no por este formulario).
+const usos = Object.values(USE_CATEGORY_LABELS);
 ---
 
 <BaseLayout

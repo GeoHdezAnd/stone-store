@@ -2,11 +2,13 @@
 import JsonLd from '../components/JsonLd.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { loadCatalog } from '../lib/catalog-loader';
+import { visitWhatsAppUrl } from '../lib/visit';
 
 const { catalog } = await loadCatalog();
 const { settings } = catalog;
 
 const whatsappUrl = `https://wa.me/${settings.whatsapp}`;
+const visitUrl = visitWhatsAppUrl(settings.whatsapp);
 const mapUrl = `https://www.openstreetmap.org/?mlat=${settings.lat}&mlon=${settings.lng}#map=13/${settings.lat}/${settings.lng}`;
 
 const business = {
@@ -22,13 +24,13 @@ const business = {
 
 <BaseLayout
   title="Contacto"
-  description="Dónde está el patio, horario y cómo escribirnos por WhatsApp o pedir una cotización."
+  description="Dónde estamos, horario y cómo escribirnos por WhatsApp o pedir una cotización."
 >
   <JsonLd slot="head" data={business} />
   <main id="contenido" class="container">
     <section class="page-head">
       <span class="eyebrow">Contacto</span>
-      <h1 class="page-title">Ven al patio o escríbenos</h1>
+      <h1 class="page-title">Ven a vernos o escríbenos</h1>
       <p class="lead">
         Escoge la piedra frente al bloque, no en una foto. Si prefieres, cuéntanos tu obra y te
         respondemos en menos de 48 horas.
@@ -44,7 +46,7 @@ const business = {
         <table class="table specs">
           <tbody>
             <tr>
-              <th scope="row">Patio</th>
+              <th scope="row">Dónde estamos</th>
               <td>
                 {settings.nombrePatio}. {settings.direccion}
               </td>
@@ -80,17 +82,17 @@ const business = {
           <a class="btn btn-ghost" href={whatsappUrl} rel="noopener">
             Escribir por WhatsApp
           </a>
-          <a class="btn btn-ghost" href="/quote/?motivo=visita">
-            Agendar visita al patio
+          <a class="btn btn-ghost" href={visitUrl} rel="noopener">
+            Agendar visita
           </a>
         </div>
       </div>
       <aside aria-labelledby="h-map">
         <h2 class="label" id="h-map">
-          Ubicación del patio
+          Ubicación
         </h2>
         <!-- PLACEHOLDER: mapa real pendiente (dirección y coordenadas exactas las da el dueño). -->
-        <div class="map-placeholder" role="img" aria-label="Mapa del patio (próximamente)">
+        <div class="map-placeholder" role="img" aria-label="Mapa de ubicación (próximamente)">
           <span aria-hidden="true">Mapa próximamente</span>
         </div>
         <p class="note">

@@ -584,15 +584,6 @@ function init(app: HTMLElement): void {
   }
 
   // ---------- Arranque ----------
-  // `?motivo=visita` precarga «Para qué es»; cualquier otro valor se ignora.
-  try {
-    if (new URLSearchParams(window.location.search).get('motivo') === 'visita') {
-      q<HTMLSelectElement>(form, '#f-uso').value = 'Visita al patio';
-    }
-  } catch {
-    // Sin acceso a la URL: no pasa nada.
-  }
-
   renderItems();
   onExternalChange(() => {
     if (!submitting && doneView.hidden) renderItems();

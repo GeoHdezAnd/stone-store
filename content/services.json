@@ -40,8 +40,8 @@
     },
     {
       "id": "visita-al-patio",
-      "titulo": "Visita al patio",
-      "descripcion": "Servicio de ejemplo: recorre el patio y elige tus piezas en persona.",
+      "titulo": "Agendar una visita",
+      "descripcion": "Servicio de ejemplo: ven, recorre y elige tus piezas en persona.",
       "activa": true
     }
   ]
