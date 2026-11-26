@@ -9,7 +9,7 @@
 
 Sitio web de **Canteras Naturales**, una cantera familiar de San Salvador el Seco, Puebla, México. Extraen, labran y venden piedra natural (arenisca, caliza, recinto negro, cantera rosa, cantera blanca, laja, travertino, piedra bola) en bloque, placa, laja y pieza labrada. Entregan en Puebla, Tlaxcala, Veracruz y CDMX.
 
-**La tienda NO cobra en línea en la v1.** El cliente arma una lista de piedras, indica su obra y recibe una **cotización** que incluye un **estimado de flete calculado automáticamente**. El pago en línea es una fase posterior.
+**La tienda NO cobra en línea en la v1.** El cliente arma una lista de piedras, indica su obra y recibe una **cotización** del dueño por correo. El sistema calcula un **estimado de flete automático**, pero **solo lo ve el dueño** en el dashboard, para revisarlo y ajustarlo antes de cotizar: el cliente no ve el estimado ni en el sitio ni en el correo de confirmación. El pago en línea es una fase posterior.
 
 Idioma del sitio y de los textos: **español de México**. Moneda: **MXN**.
 
@@ -20,7 +20,7 @@ Idioma del sitio y de los textos: **español de México**. Moneda: **MXN**.
 1. Sitio público rápido y responsivo (teléfono, tableta, escritorio) con catálogo de piedras y proyectos.
 2. Lista de cotización (tipo carrito, sin precios).
 3. Formulario de cotización que guarda la solicitud y avisa por correo al cliente y al dueño.
-4. **Estimado de flete automático** según código postal, cantidad, peso y tipo de camión.
+4. **Estimado de flete automático** según código postal, cantidad, peso y tipo de camión. Se guarda en la solicitud y lo ve solo el dueño; no hay ruta pública ni pantalla para el cliente.
 5. **Dashboard del dueño** (área privada con login) para gestionar solicitudes, catálogo, proyectos y tarifas de flete, y ver métricas (sección 5.3).
 6. Todo desplegado en AWS, definido como código, con costo cercano a cero con poco tráfico.
 
@@ -48,7 +48,7 @@ Reglas al convertirlo a código de producción:
 - Conservar el look: tipografía, colores, espaciados, cuadrícula y las dos vistas del catálogo (Fichas / Índice) y de la ficha (Ficha / Editorial).
 - Accesibilidad: `<button>`, `<a href>`, `<label for>` reales; contraste mínimo 4.5:1; `aria-label` en botones de solo ícono; teclado completo.
 - Imágenes: el diseño tiene "image-slot" (zonas para subir foto). En producción serán `<img>` servidas desde S3/CloudFront con `srcset` y `loading="lazy"`.
-- El estimado de flete del diseño usa **cifras de ejemplo**; en producción viene de la API (sección 7).
+- El diseño de la página de cotización muestra un estimado de flete con **cifras de ejemplo**; en producción **no se muestra al cliente** (lo calcula el servidor y lo ve solo el dueño, sección 7): al convertir el diseño, omite esa tarjeta.
 
 ## 4. Stack recomendado
 
@@ -56,9 +56,9 @@ Reglas al convertirlo a código de producción:
 |---|---|---|
 | Frontend público | **Astro** (HTML estático, islas de JS donde haga falta) — decidido | Desde la fase 4: loader de build que lee `catalog.json` publicado en S3 desde el dashboard (ver 6.1), con `content/` como respaldo. Un cambio publicado dispara un rebuild. |
 | Dashboard del dueño | **SPA en Vite + React + TypeScript** (app separada en `apps/admin`) | Servida desde su propio origen/ruta (`admin.<dominio>`), `noindex`, tablas con TanStack Table, gráficas con Recharts o similar. |
-| Autenticación | **Amazon Cognito** (User Pool + grupos `owner`, `staff`) | Login con correo y contraseña + MFA (TOTP) obligatorio para `owner`. API protegida con JWT authorizer de API Gateway. |
+| Autenticación | **Amazon Cognito** (User Pool + grupos `owner`, `staff`) | Login con correo y contraseña + MFA (TOTP, app autenticadora; sin SMS) **obligatorio para todos los roles** en AWS real: Cognito solo permite exigirlo por pool, no por grupo, así que `owner` y `staff` lo usan. El pool queda `REQUIRED` en AWS real y `OPTIONAL` en Floci (para que `scripts/dev-token.ts` y los `curl` de la guía sigan funcionando). El dashboard tiene el alta de TOTP (QR en SVG + clave en texto + código de 6 dígitos) y la pantalla de código al iniciar sesión. **Pendiente:** probar el flujo en el navegador y en AWS real (en Floci no está verificado); la recuperación si se pierde el teléfono (`AdminDeleteSoftwareToken`) está en `docs/levantar-y-probar.md` 6.6. API protegida con JWT authorizer de API Gateway. |
 | Lenguaje | **TypeScript** en todo — decidido (Java descartado para el MVP) | Frontend, Lambdas e infra. Ejecutar TS con `tsx` (no `ts-node`, que falla con TypeScript 7). |
-| Backend | **AWS Lambda** (runtime `nodejs22.x` o superior; `nodejs20.x` está deprecado) + **API Gateway HTTP API** | Una Lambda por **recurso** de la API de administración (con un router interno por método y ruta); los endpoints públicos sin autenticación (`freight-estimate`, `quotes-create`) conservan una Lambda propia. Lógica de dominio pura en `packages/shared`; clientes AWS en `services/api/src/lib` (ver 9). |
+| Backend | **AWS Lambda** (runtime `nodejs22.x` o superior; `nodejs20.x` está deprecado) + **API Gateway HTTP API** | Una Lambda por **recurso** de la API de administración (con un router interno por método y ruta); los endpoints públicos sin autenticación (solo `GET /health` y `POST /quotes`, esta última en la Lambda `quotes-create`) conservan una Lambda propia. Además hay una Lambda disparada por S3 (`media-variants`, genera las variantes WebP). Lógica de dominio pura en `packages/shared`; clientes AWS en `services/api/src/lib` (ver 9). |
 | Base de datos | **DynamoDB** (on-demand) | Ver sección 6. |
 | Imágenes/estáticos | **S3 + CloudFront** | OAC (Origin Access Control), nunca bucket público directo. |
 | Dominio/HTTPS | **Route 53 + ACM** (certificado en us-east-1 para CloudFront) | Opcional y apagado por defecto (flag de contexto CDK): en la fase 1 se usa el dominio `*.cloudfront.net`. Se activa cuando haya dominio. |
@@ -78,18 +78,18 @@ Región por defecto: **us-east-1** (más servicios, menor costo). Documentar cua
 2. En **Catálogo** filtra por uso (Pisos, Fachadas, Cubiertas de cocina, Escultura y ornamento, Exteriores y jardín, Muros y sillería) y abre la **ficha** de una piedra.
 3. En la ficha elige acabado (según la piedra) y pulsa **"Agregar a cotización"**. El contador "Cotización · N" del encabezado sube. La lista se guarda en `localStorage` (con try/catch; el sitio debe funcionar sin él).
 4. Abre **Cotización** (contacto). Ve su lista de piedras y llena: nombre, WhatsApp/teléfono, correo, lugar de la obra, **código postal**, para qué es, **cantidad + unidad** (m², piezas, toneladas) y notas.
-5. Al tener CP válido (5 dígitos) y cantidad > 0, el sitio llama a `POST /freight/estimate` y muestra el **estimado de flete**: rango en MXN, peso aproximado, distancia, camión y viajes. Siempre con la leyenda "estimado sujeto a confirmación".
+5. El sitio **no muestra ningún estimado de flete** al cliente (decisión del dueño): el flete se confirma en la cotización que le envía el dueño. El servidor sí calcula el estimado al recibir la solicitud (7) y lo guarda para el dueño.
 6. Pulsa **"Enviar solicitud"** → `POST /quotes`. Ve una pantalla de confirmación con su folio (ej. `CN-2026-00042`).
-7. Recibe un correo de confirmación con el resumen y el estimado de flete. El dueño recibe un correo con todos los datos.
+7. Recibe un correo de confirmación con el folio y el resumen de piedras, **sin importes ni estimado de flete**. El dueño recibe un correo con los datos de la solicitud y un enlace al detalle del dashboard, donde ve el estimado de flete (el correo no lo incluye).
 8. El dueño revisa, fija precios y flete final y responde por correo/WhatsApp (en menos de 48 h, promesa del sitio).
 9. Alternativa: botón **"Escribir por WhatsApp"** abre `https://wa.me/52XXXXXXXXXX?text=...` con un mensaje prellenado (piedras + CP + cantidad).
-10. Otra acción: **"Agendar visita al patio"** (en v1, lleva al formulario con motivo "visita" o a WhatsApp; no hay calendario).
+10. Otra acción: **"Agendar visita"**: abre WhatsApp (`wa.me`) con un mensaje prellenado; una visita **no es una cotización**, así que no pasa por el formulario (que exige al menos una piedra) ni crea solicitud. No hay calendario. En el sitio público **no se usa la palabra «patio»** (es un término interno del dueño y del código: `nombrePatio`, «patio» en el dashboard y en esta guía): lo que ve el visitante habla del negocio («Dónde estamos», «Agendar visita», «nuestro taller»).
 
 ### 5.2 Flujo del dueño (con dashboard)
 1. Recibe correo por cada solicitud nueva (SES) con un enlace directo al detalle en el dashboard.
 2. Entra al dashboard (login + MFA) → ve solicitudes nuevas arriba.
 3. Abre una solicitud: ve cliente, obra, piedras, cantidades y el **estimado de flete automático**.
-4. Captura precios por piedra y el **flete final** (puede aceptar el estimado o ajustarlo), añade notas internas y cambia el estado.
+4. Captura precios por piedra y el **flete final** (puede aceptar el estimado o ajustarlo), elige el **IVA** de la cotización (solo `owner`; ver 5.5), añade notas internas y cambia el estado.
 5. Pulsa **"Enviar cotización"** → el sistema manda un correo (SES) al cliente con la cotización final y vigencia; el estado pasa a `enviada`. (Opcional: botón "Responder por WhatsApp" con mensaje prellenado.)
 6. Marca el resultado: `ganada` / `perdida` (con motivo).
 7. Cuando cambia el catálogo (piedras, fotos, proyectos) o las tarifas, lo edita en el dashboard y pulsa **"Publicar"**: el sitio público se actualiza sin deploy de código.
@@ -103,7 +103,7 @@ Ruta base `admin.<dominio>`; todo en español; responsivo (el dueño lo usará d
 4. **Proyectos**: CRUD con fotos, piedras usadas, testimonio.
 5. **Acabados y servicios**: CRUD simple.
 6. **Flete y tarifas**: editar camiones, tarifa base/por km/mínimo, margen del rango, zonas cubiertas, recargo de descarga; **versionado** (cada guardado crea versión, la activa se marca); **simulador** (CP + piezas → muestra el estimado sin crear solicitud).
-7. **Configuración**: datos del patio (dirección, lat/lng, horario), teléfono/WhatsApp, correo remitente, plantillas de correo (texto editable con variables), usuarios (invitar `staff`).
+7. **Configuración**: datos del patio (dirección, lat/lng, horario), teléfono/WhatsApp, correo remitente, plantillas de correo (texto editable con variables), **IVA por defecto de las cotizaciones** (sección «Cotización»), usuarios (invitar `staff`: pendiente, ver 8).
 8. **Publicar**: botón que genera `catalog.json` desde DynamoDB, lo sube a S3 y pide invalidación en CloudFront; muestra fecha de la última publicación y permite revertir a la anterior (versiones en S3).
 
 Reglas del dashboard: nunca mostrar datos de clientes sin sesión válida; registrar **auditoría** (quién cambió qué y cuándo) en cada escritura; confirmar acciones destructivas; estados de carga/errores claros; accesible por teclado.
@@ -114,17 +114,17 @@ Reglas del dashboard: nunca mostrar datos de clientes sin sesión válida; regis
 ### 5.5 Reglas de datos que salieron del diseño del dashboard
 Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 debe respetarlas.
 
-- **Solicitud (detalle)**: el dueño captura `precioUnitario` por cada piedra (subtotal = cantidad × precio), `fleteFinal` (puede aceptar el estimado o ajustarlo) y `vigenciaDias` (por defecto **15**). Total = piedra + flete. **IVA: pendiente de definir**; por ahora el total se muestra "sin IVA" y `finalQuote.ivaPct` es opcional (null = no aplica).
+- **Solicitud (detalle)**: el dueño captura `precioUnitario` por cada piedra (subtotal = cantidad × precio), `fleteFinal` (puede aceptar el estimado o ajustarlo) y `vigenciaDias` (por defecto **15**). **IVA por cotización** (decisión del dueño): `finalQuote.ivaPct` es `null` (sin IVA), `8` o `16`; el IVA se calcula **solo sobre la piedra** y el flete va aparte, sin impuesto: `total = subtotal de piedra + IVA + fleteFinal`. El servidor calcula todo en centavos enteros (`iva = round(subtotal × tasa)`); el cliente nunca manda `iva` ni `total`. **Solo `owner` cambia la tasa** (si `staff` manda `ivaPct`, 403); si `staff` re-guarda precios, la tasa que fijó el `owner` se conserva. La tasa por defecto vive en la fila `QUOTING` de `Settings` y solo **preselecciona** el selector en la primera cotización. Una cotización enviada, ganada o perdida no se recalcula. El 8 % (franja fronteriza) es opción de ejemplo y no está verificado contra normativa fiscal.
 - **Estado "perdida"** exige `lostReason` (lista sugerida: precio de la piedra, precio del flete, tiempo de entrega, eligió otro proveedor, sin respuesta, otro).
 - **Historial** de cada solicitud: cada cambio de estado, nota interna, envío de correo y edición de precios agrega una entrada `{at, by, tipo, texto}`. Las notas internas nunca se envían al cliente.
 - **Estimado vs. final**: se conservan ambos (`freight` automático y `finalQuote.fleteFinal`) y la `versionTarifa` con la que se estimó.
-- **Piedra**: el peso por m² se **deriva** de `densidadKgM3` (peso por m² a 5 cm = densidad ÷ 100 × 5). `existencia` toma valores como "En patio" o "Bajo pedido". `vendidaPor` es una lista (m², pieza, tonelada). `activa` controla si aparece en el sitio.
+- **Piedra**: el peso por m² se **deriva** de `densidadKgM3` (peso por m² a 5 cm = densidad ÷ 100 × 5). `existencia` toma valores como "En existencia" o "Bajo pedido" (se muestra en el sitio público, así que no lleva la palabra «patio»). `vendidaPor` es una lista (m², pieza, tonelada). `activa` controla si aparece en el sitio.
 - **Proyecto**: tiene `estado` (`publicado` | `borrador`); solo los publicados entran a `catalog.json`.
-- **Tarifas de flete**: versionadas; cada guardado crea una versión nueva y una sola está activa. Incluyen `mermaPct` (merma y embalaje) y `maxKm`. El simulador del dashboard usa exactamente la misma función de cálculo que la API pública (código compartido en `packages/shared`; el simulador del dashboard puede además llamar a `POST /admin/freight/simulate`).
-- **Métricas** (pantalla Resumen): solicitudes nuevas/por atender, cotizadas y ganadas del mes con su valor, tiempo promedio de respuesta (meta < 48 h), solicitudes por semana (últimas 8), piedras más solicitadas (30 días), embudo del mes y solicitudes por zona (estado a partir del CP).
+- **Tarifas de flete**: versionadas; cada guardado crea una versión nueva y una sola está activa. Incluyen `mermaPct` (merma y embalaje) y `maxKm`. El simulador del dashboard usa exactamente la misma función de cálculo que `POST /quotes` (código compartido en `packages/shared`; el simulador llama a `POST /admin/freight/simulate`). No existe ruta pública de estimado.
+- **Métricas** (pantalla Resumen; `GET /admin/metrics` sin parámetros, con un rango fijo de 120 días; valor cotizado y ganado = `finalQuote.total`, **con IVA y flete**): solicitudes nuevas/por atender, cotizadas y ganadas del mes con su valor, tiempo promedio de respuesta (meta < 48 h), solicitudes por semana (últimas 8), piedras más solicitadas (30 días), embudo del mes y solicitudes por zona (estado a partir del CP).
 - **Publicar**: lista de cambios pendientes desde la última publicación (a partir de `AuditLog`), publicación con versión (`v12`, etc.) y reversión a una versión anterior.
-- **Configuración**: `Settings` guarda nombre del patio, dirección, lat, lng, horario, WhatsApp, correo remitente y plantilla del correo (variables: nombre, folio, piedras, flete, total, vigencia). Usuarios: correo, rol (`owner` | `staff`), MFA, último acceso (vienen de Cognito).
-- **Exportar CSV** de solicitudes respetando los filtros activos.
+- **Configuración**: `Settings` guarda nombre del patio, dirección, lat, lng, horario, WhatsApp, correo remitente (fila `PUBLIC`), la plantilla del correo (fila `MAIL`; variables: nombre, folio, piedras, subtotal, iva, flete, total, vigencia) y el IVA por defecto (fila `QUOTING`, `ivaPctDefault`: `null`, `8` o `16`; no se publica en `catalog.json`; solo `owner` la edita, y solo `AdminSettings` la lee en IAM). El correo de la cotización final siempre muestra el desglose Piedra / IVA / Flete / Total, aunque la plantilla guardada no use `{{subtotal}}` ni `{{iva}}`. Usuarios: correo, rol (`owner` | `staff`), MFA, último acceso (vienen de Cognito).
+- **Exportar CSV** de solicitudes respetando los filtros activos (solo `owner`; incluye subtotal de piedra, IVA % e IVA, flete final y total).
 
 ## 6. Datos a almacenar
 
@@ -148,7 +148,6 @@ Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 d
   "existencia": "En patio, San Salvador el Seco",
   "entregaDias": 7,
   "vendidaPor": ["m2", "pieza", "tonelada"],
-  "pesoKgPorM2PorCm": 22,
   "pesoKgPorPieza": null,
   "densidadKgM3": 2200,
   "fotos": ["stones/arenisca/1.jpg"],
@@ -176,8 +175,8 @@ Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 d
 | `customer` | map | `nombre`, `telefono`, `correo`. |
 | `works` | map | `lugar`, `codigoPostal`, `uso`, `notas`. |
 | `items[]` | list | `{stoneId, nombre, acabado, cantidad, unidad, pesoKg}` por piedra. |
-| `freight` | map | `estimadoMin`, `estimadoMax`, `moneda`, `pesoTotalKg`, `distanciaKm`, `camion`, `viajes`, `versionTarifa`, `calculadoAt`. |
-| `finalQuote` | map | `items[{stoneId, precioUnitario, subtotal}]`, `fleteFinal`, `subtotal`, `iva` (si aplica), `total`, `vigenciaDias`, `enviadaAt`. Lo llena el dueño en el dashboard. |
+| `freight` | map | `estimadoMin`, `estimadoMax`, `moneda`, `pesoTotalKg`, `distanciaKm`, `camion`, `viajes`, `versionTarifa`, `calculadoAt`. Lo calcula el servidor al crear la solicitud (opcional: si falla, se guarda sin él); solo lo ve el dueño. |
+| `finalQuote` | map | `items[{stoneId, precioUnitario, subtotal}]`, `fleteFinal`, `subtotal` (de piedra), `ivaPct` (`null` \| 8 \| 16), `iva` (`null` si no aplica; solo sobre la piedra), `total` (= subtotal + iva + fleteFinal), `vigenciaDias`, `enviadaAt`. Lo llena el dueño en el dashboard; el servidor calcula los importes. |
 | `history[]` | list | Línea de tiempo: `{at, by, tipo (estado/nota/correo/edicion), de, a, texto}`. |
 | `notes[]` | list | Notas internas `{at, by, texto}` (nunca visibles al cliente). |
 | `lostReason` | string | Motivo si queda `perdida`. |
@@ -195,7 +194,7 @@ Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 d
 
 **`AuditLog`**: `pk = "ENTITY#<tipo>#<id>"`, `sk = "<ISO timestamp>#<requestId>"` (único por petición y ordenable por tiempo; el `requestId` evita colisiones en el mismo milisegundo), `userId`, `accion`, `antes`, `despues`. Escrito por toda API de admin, en la misma transacción que la escritura que audita. Límite conocido del MVP: `antes` viene de una lectura previa a la transacción, así que bajo escrituras simultáneas sobre el mismo registro puede quedar desfasado.
 
-**`Settings`**: una fila `PUBLIC` (patio, horario, WhatsApp, textos) y una `MAIL` (plantillas de correo con variables).
+**`Settings`**: tres filas: `PUBLIC` (patio, horario, WhatsApp, textos; es lo único que llega a `catalog.json`), `MAIL` (plantillas de correo con variables) y `QUOTING` (IVA por defecto, `ivaPctDefault`). Una fila `QUOTING` ausente o inválida equivale a `null` (sin IVA) y no afecta a las demás.
 
 **`Publications`**: `version`, `publishedAt`, `publishedBy`, `s3Key` (para revertir).
 
@@ -205,7 +204,8 @@ Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 d
 
 ### 6.3 Archivos en S3
 - Bucket `site-<env>`: sitio estático.
-- Bucket `media-<env>`: fotos originales + variantes (WebP/AVIF, 480/960/1600 px). Estructura `stones/<id>/…`, `projects/<id>/…`.
+- Bucket `media-<env>`: fotos originales + variantes WebP de 480/960/1600 px (`<clave sin extensión>-<ancho>w.webp`), que genera la Lambda `media-variants` al subir (en Floci no dispara: usar `scripts/media-backfill.ts`). El sitio público sirve **solo variantes**, nunca el original, porque conserva EXIF/GPS. Estructura `stones/<id>/…`, `projects/<id>/…`.
+- Mientras el dueño consigue fotos reales, hay **texturas ilustrativas** de relleno que genera la skill `/stone-images` (no son fotos del producto y no deben presentarse como tales).
 - Todo detrás de CloudFront con OAC; bucket privado.
 
 ### 6.4 Privacidad (México, LFPDPPP)
@@ -214,33 +214,32 @@ Decisiones tomadas al diseñar `Dashboard.dc.html`; el modelo de la sección 6 d
 
 ## 7. Estimado de flete automático
 
-### 7.1 Endpoint
-`POST /freight/estimate`
-```json
-// request
-{ "codigoPostal": "74000", "items": [{ "stoneId": "arenisca", "cantidad": 210, "unidad": "m2", "espesorCm": 5 }] }
+### 7.1 Dónde se calcula (no hay ruta pública)
+El estimado **no tiene endpoint público** (decisión del dueño: el cliente no lo ve). Se calcula en dos lugares, con el mismo código (`computeFreightEstimate`, en `services/api/src/lib/freight-quote.ts`, sobre las funciones puras de `packages/shared/src/freight`):
+- **`POST /quotes`:** al crear la solicitud, de forma *best-effort* (con plazo corto): si falla o no hay proveedor de rutas, la solicitud se guarda igual sin `freight` y el dueño la atiende a mano. Se guarda en `Quotes.freight` (6.2).
+- **`POST /admin/freight/simulate`:** el simulador del dashboard (CP + piezas, o `distanciaKm` directa), sin crear solicitud.
 
-// response 200
+Forma del resultado:
+```json
 {
   "estimadoMin": 7200, "estimadoMax": 8800, "moneda": "MXN",
   "pesoTotalKg": 23100, "distanciaKm": 62,
   "camion": "Tráiler", "viajes": 1,
-  "versionTarifa": "2026-11-01",
-  "aviso": "Estimado sujeto a confirmación."
+  "versionTarifa": "2026-11-01"
 }
-// errores: 400 (CP o cantidad inválidos), 422 (fuera de zona de cobertura), 429 (throttle), 502 (falla de geocodificación/ruta)
+// errores de dominio: CP inválido, fuera de zona de cobertura (422 `out_of_zone`, «consúltenos por WhatsApp»), falla de geocodificación/ruta (502)
 ```
-Validar con **zod** (CP `^\d{5}$`, cantidad > 0 y con tope razonable, unidad en el enum, `stoneId` existente). Nunca confiar en el peso enviado por el navegador: **el servidor lo calcula** desde `content/`/DB.
+Validar con **zod** (CP `^\d{5}$`, cantidad > 0 y con tope razonable, unidad en el enum, `stoneId` existente; esquemas estrictos que rechazan un `pesoKg` enviado por el cliente). Nunca confiar en el peso enviado por el navegador: **el servidor lo calcula** desde la DB.
 
 ### 7.2 Algoritmo
-1. **Peso**: por ítem según unidad. m² → `densidad × (espesor/100) × m²` (o `pesoKgPorM2PorCm × espesor × m²`); pieza → `pesoKgPorPieza × n`; tonelada → `n × 1000`. Sumar y agregar % de merma/tarima/embalaje (config).
+1. **Peso**: por ítem según unidad. m² → `densidad × (espesor/100) × m²` (el peso por m² se deriva siempre de `densidadKgM3`; no existe un campo de peso por m² editable); pieza → `pesoKgPorPieza × n`; tonelada → `n × 1000`. Sumar y agregar % de merma/tarima/embalaje (config).
 2. **Origen/destino**: origen fijo (patio). Destino: lat/lng del CP desde `PostalCodes` (preferido, gratis) o Location Service Places (`SearchText` con "CP, México").
 3. **Distancia por carretera**: Location Service **Routes** (`CalculateRoutes`, modo camión si está disponible, si no auto) origen→destino. Cachear resultado por CP en DynamoDB (`RouteCache`, TTL 90 días) para no repetir llamadas.
 4. **Camión y viajes**: elegir el camión de menor costo que cubra el peso; si excede el mayor, dividir en viajes del camión más grande.
 5. **Costo**: `max(minimo, base + distanciaKm × porKm) × viajes + recargoDescarga`. Considerar ida y vuelta si el dueño así lo cobra (parámetro).
 6. **Rango**: `estimado ± margenRango%`, redondeado a $50.
 7. Registrar `versionTarifa` para poder auditar cotizaciones viejas.
-8. Si el CP está fuera de `zonasCubiertas` o `maxKm` → 422 con mensaje "consúltenos por WhatsApp".
+8. Si el CP está fuera de `zonasCubiertas` o `maxKm` → `out_of_zone` ("consúltenos por WhatsApp"). Un CP ausente de `PostalCodes` también es `out_of_zone`. La caché de rutas guarda también una respuesta negativa («sin ruta») con TTL corto de 1 h; los errores transitorios (timeout, 5xx, throttling) **no** se cachean.
 
 > Las tarifas reales **no existen todavía**. Pedírselas al dueño (ver sección 12) y mientras tanto usar un `FreightConfig` de ejemplo claramente marcado como `ejemplo: true`.
 
@@ -251,8 +250,7 @@ Tests unitarios con casos: 1 m², 210 m² (varios viajes), tonelada, mezcla de p
 
 | Método y ruta | Descripción |
 |---|---|
-| `POST /freight/estimate` | Estimado de flete (7.1). Pública, con throttling. |
-| `POST /quotes` | Crea solicitud: valida con zod, verifica Turnstile, recalcula flete en servidor, guarda, genera folio, manda correos (SES). Devuelve `{ folio }`. |
+| `POST /quotes` | Crea solicitud (única ruta pública con datos): valida con zod, verifica Turnstile, recalcula el estimado de flete en servidor (best-effort, 7.1), guarda, genera folio, manda correos (SES). Devuelve `{ folio }`. Throttling y cupos por correo e IP. |
 | `GET /quotes/{folio}` (opcional) | Consulta de estado con folio + correo. Fase posterior. |
 | `GET /health` | Comprobación simple. |
 
@@ -262,22 +260,22 @@ Tests unitarios con casos: 1 m², 210 m² (varios viajes), tonelada, mezcla de p
 |---|---|
 | `GET /admin/quotes?status=&q=&from=&to=&cursor=` | Lista paginada con filtros. |
 | `GET /admin/quotes/{quoteId}` | Detalle con historial y notas. |
-| `PATCH /admin/quotes/{quoteId}` | Cambiar estado, precios, flete final, motivo de pérdida (valida transiciones permitidas). |
+| `PATCH /admin/quotes/{quoteId}` | Cambiar estado, precios, flete final, motivo de pérdida (valida transiciones permitidas). La tasa de IVA (`finalQuote.ivaPct`) solo la puede fijar `owner`; el servidor calcula `subtotal`, `iva` y `total`. |
 | `POST /admin/quotes/{quoteId}/notes` | Agregar nota interna. |
 | `POST /admin/quotes/{quoteId}/send` | Enviar cotización final al cliente (SES) y marcar `enviada`. |
 | `GET /admin/quotes/export.csv` | Exportar con los filtros actuales. |
-| `GET /admin/metrics?from=&to=` | Datos del resumen. |
+| `GET /admin/metrics` | Datos del resumen (`owner` y `staff`, solo lectura). No acepta parámetros (400 si llegan): usa un rango fijo de 120 días. |
 | `GET/POST/PUT/DELETE /admin/stones`, `/admin/projects`, `/admin/finishes`, `/admin/services` | CRUD del catálogo (borrado lógico). |
 | `POST /admin/media/upload-url` | Devuelve URL prefirmada de S3 (valida tipo y tamaño). |
 | `GET/PUT /admin/freight-config` | Ver versiones / crear nueva versión de tarifas. |
 | `POST /admin/freight/simulate` | Simulador de flete. |
-| `GET/PUT /admin/settings` | Configuración y plantillas de correo. |
+| `GET /admin/settings` · `PUT /admin/settings/public` · `PUT /admin/settings/mail` · `PUT /admin/settings/quoting` | Configuración (patio, plantillas de correo, IVA por defecto). El `GET` devuelve las tres filas; solo `owner` escribe. |
 | `POST /admin/publish` · `GET /admin/publications` · `POST /admin/publications/{version}/revert` | Publicar y revertir `catalog.json`. |
-| `POST /admin/users/invite` | Invitar usuario `staff` (Cognito AdminCreateUser). |
+| `POST /admin/users/invite` | Invitar usuario `staff` (Cognito AdminCreateUser). **Pendiente, no implementada:** hoy los usuarios de desarrollo se crean con `scripts/dev-users.ts`. |
 
 Requisitos transversales: CORS solo al dominio del sitio; límites de tamaño de body; throttling por IP/etapa; respuestas de error sin filtrar detalles internos; logs estructurados JSON con `requestId` (sin datos personales completos).
 
-**Correos (SES)**: plantillas HTML + texto plano en español. 1) Confirmación al cliente (folio, resumen, estimado de flete, aviso de 48 h). 2) Aviso al dueño (todos los datos + enlace/consulta). Manejar rebotes/quejas (SNS → log).
+**Correos (SES)**: plantillas HTML + texto plano en español. 1) Confirmación al cliente (folio, resumen de piedras, aviso de 48 h; **sin importes ni estimado de flete** y sin texto libre del cliente). 2) Aviso al dueño (datos de la solicitud y enlace al detalle del dashboard; el estimado de flete se ve ahí, no en el correo). 3) Cotización final al cliente (desglose Piedra / IVA / Flete / Total y vigencia). Manejar rebotes/quejas (SNS → log).
 
 ## 9. Estructura del repo y de la infraestructura
 
@@ -300,16 +298,19 @@ canteras-naturales/
 ├─ services/api/              # Lambdas (TypeScript), solo servidor
 │  └─ src/
 │     ├─ lib/                 # clientes AWS (DynamoDB, S3, SES), auth/roles, auditoría, logger
-│     ├─ freight-estimate/
-│     ├─ quotes-create/
+│     ├─ quotes-create/       # POST /quotes (única ruta pública con datos)
+│     ├─ media-variants/      # Lambda disparada por S3: variantes WebP de las fotos
 │     └─ admin-*/             # una Lambda por recurso, con router interno: quotes, catalog (stones, projects, finishes, services),
-│                             # media, freight-config, settings, metrics, publish, users
+│                             # media, freight (tarifas y simulador), settings, metrics, publish, me (usuarios: pendiente)
 ├─ infra/                     # AWS CDK (TypeScript)
 │  └─ stacks: SiteStack (S3, CloudFront, [Route53, ACM opcionales]), ApiStack (API GW, Lambdas, IAM),
-│              DataStack (DynamoDB), MediaStack (S3 de fotos), MailStack (SES), AuthStack (Cognito), AdminSiteStack (S3+CloudFront del dashboard),
-│              ObservabilityStack (alarms, budgets)
-├─ scripts/                   # importar CP, listar solicitudes, cargar FreightConfig
-└─ .github/workflows/         # CI/CD
+│              DataStack (DynamoDB), MediaStack (S3 de fotos + Lambda de variantes), PublishStack (S3 de `catalog.json`), AuthStack (Cognito),
+│              AdminSiteStack (S3+CloudFront del dashboard), ObservabilityStack (alarmas, SNS, budgets), CiStack (rol OIDC de CI)
+│              (el correo usa SES desde las Lambdas; no hay un `MailStack` aparte)
+├─ scripts/                   # seed, seed-freight, seed-postal-codes, seed-quotes, dev-users, dev-token, admin-config, sync-site, media-backfill
+├─ docs/                      # levantar-y-probar.md (guía de pruebas) y siguiente-sesion.md (relevo entre sesiones); no se rastrean en git
+├─ .claude/                   # agente de relevo (session-handoff) y skill stone-images
+└─ .github/workflows/         # CI/CD (deploy.yml dormido hasta el hito de AWS real)
 ```
 
 ### 9.1 Reglas de arquitectura del repo
@@ -329,6 +330,7 @@ canteras-naturales/
 - Levantar: `docker compose up -d` desde la raíz (usa `docker-compose.yml`, con el socket de Docker y un volumen de datos) y salud en `curl localhost:4566/_floci/health`. El socket de Docker es obligatorio (Lambda corre en contenedores). **El JWT authorizer solo funciona si Floci tiene una IP fija**: el compose crea una red con subred fija y `FLOCI_HOSTNAME` es una IP literal (`172.30.0.10`, constante `FLOCI_IP` en `infra/lib/config.ts`); con un nombre de host el authorizer responde 401 siempre.
 - Variables solo para Floci: `AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 AWS_ENDPOINT_URL=http://localhost:4566`; bootstrap con `npx cdk bootstrap aws://000000000000/us-east-1`. CDK respeta `AWS_ENDPOINT_URL`, no hace falta `cdklocal`.
 - Límites conocidos: no ejecuta CloudFront Functions, no soporta `ResponseHeadersPolicy` custom vía CloudFormation, el JWT authorizer rechaza issuers privados salvo `FLOCI_SECURITY_ALLOW_PRIVATE_JWT_TARGETS=true`, **no aplica bucket policy ni BlockPublicAccess** (un GET sin firma a S3 devuelve 200) y la Lambda de `autoDeleteObjects` falla con `ECONNREFUSED` al puerto 443 (también con Compose). Por eso `SiteStack` apaga `autoDeleteObjects` cuando hay `AWS_ENDPOINT_URL` (`DeployEnv.emulated`) y el bucket se vacía a mano antes de `cdk destroy`. Probar la lógica de esas piezas con tests unitarios y verificarlas en AWS real, en el hito de salida. Verificar en ese smoke test: rechazo de lectura directa al bucket, OAC, `defaultRootObject`, validación DNS de ACM y alias de Route 53.
+- Para ver fotos en el sitio local: proxy `/media` (variable `MEDIA_DEV_BUCKET`) y `CATALOG_URL` hacia el `catalog.json` publicado en Floci (guía `docs/levantar-y-probar.md`, 9.1).
 - Nunca usar credenciales reales con `AWS_ENDPOINT_URL` apuntando a Floci, ni al revés.
 - `autoDeleteObjects: true` solo en `dev`; jamás en `prod`.
 
@@ -336,7 +338,7 @@ canteras-naturales/
 - Lint + typecheck + tests en cada PR. Cobertura alta en `packages/shared` (flete y validaciones).
 - **Sin tests en el frontend (decisión del dueño):** `apps/web` y `apps/admin` **no llevan pruebas** (ni unitarias, ni de componentes, ni e2e) y no se instalan dependencias de prueba en ellas (Vitest, Testing Library, jsdom, Playwright, etc.). La lógica que sí debe probarse vive en `packages/shared` (dominio puro) y en `services/*`, que mantienen sus tests. En el frontend la verificación es `typecheck`, `lint`, `prettier --check`, `build` y la prueba manual en el navegador (ver `docs/levantar-y-probar.md`). No agregues tests al frontend aunque la tarea sea crítica (p. ej. la sesión); si algo del frontend parece pedir una prueba, avísame en vez de escribirla. Un fallo de autenticación en el navegador se cubre con la revisión adversarial y con la validación del servidor, que es quien autoriza.
 - Sin secretos en el repo (usar SSM Parameter Store / Secrets Manager para claves de Turnstile, etc.).
-- Dashboard: MFA para `owner`, sesiones con expiración corta, `noindex`/`robots` bloqueado, CORS restringido al origen del admin, validación de rol en **cada** Lambda (no solo en el frontend), PII protegida (no en logs, no en URLs), auditoría de escrituras.
+- Dashboard: MFA TOTP obligatorio para todos los roles (a nivel de pool), sesiones con expiración corta, `noindex`/`robots` bloqueado, CORS restringido al origen del admin, validación de rol en **cada** Lambda (no solo en el frontend), PII protegida (no en logs, no en URLs), auditoría de escrituras.
 - Cabeceras de seguridad en CloudFront (CSP, HSTS, X-Content-Type-Options).
 - Lighthouse ≥ 90 en móvil (rendimiento y accesibilidad); imágenes optimizadas.
 - **AWS Budgets** con alerta a USD 5/10 y alarma de errores de Lambda/5xx de API.
@@ -351,9 +353,11 @@ canteras-naturales/
 3. **Dashboard: publicar, tarifas y solicitudes**: `catalog.json` + botón Publicar/Revertir (versionado en S3, invalidación de CloudFront), editor de tarifas con versionado y simulador (`FreightConfig` de ejemplo), `Quotes` y `FreightConfig` en `DataStack`, lista y detalle de solicitudes, cambio de estado, notas, precios, flete final y "Enviar cotización" por SES. Mientras no exista el formulario público, las solicitudes se siembran con un script. *Aprender: versionado de S3, invalidaciones de CloudFront, SES.*
 4. **Sitio público y formulario**: sitio Astro (inicio, catálogo, ficha de piedra con layout Ficha, placeholders "En construcción") que lee el `catalog.json` publicado desde el dashboard, lista de cotización en `localStorage`, API Gateway + Lambda `quotes-create` + SES, folio, validación, anti-spam y aviso de privacidad. Texto y botones con el acento oscuro `#ae1800`. *Aprender: Astro, Lambda, API Gateway.*
 
-**Hito: salida a AWS real** (después de la fase 4, con el MVP probado en Floci; decisión del dueño): cuenta de AWS nueva (usuario administrador con MFA, `AWS Budgets` y perfil de CLI con nombre), bootstrap con política de ejecución acotada (`--cloudformation-execution-policies`), despliegue manual de `CiStack`, configuración de GitHub (environment `dev` con revisores y solo `main`, variables `AWS_ROLE_ARN` y `AWS_ACCOUNT_ID`), primer despliegue con `cdk diff` por delante y smoke test de lo que Floci no verifica (bucket policy y OAC, JWT authorizer de Cognito real, SES en sandbox, cabeceras de CloudFront, Location Service). *Aprender: bootstrap, IAM de mínimo privilegio, OIDC.*
-5. **Flete automático**: `PostalCodes`, `freight-estimate`, Location Service, caché de rutas, UI del estimado en el formulario, estimado guardado en la solicitud. *Aprender: Location Service, diseño de reglas de negocio, pruebas.*
-6. **Dashboard: métricas y operación**: resumen con gráficas, exportar CSV, alarmas, Budgets, optimización de imágenes (Lambda al subir a S3).
+**Hito: salida a AWS real** (después de la fase 4, con el MVP probado en Floci; decisión del dueño): cuenta de AWS nueva (usuario administrador con MFA, `AWS Budgets` y perfil de CLI con nombre), bootstrap con política de ejecución acotada (`--cloudformation-execution-policies`), despliegue manual de `CiStack`, configuración de GitHub (environment `dev` con revisores y solo `main`, variables `AWS_ROLE_ARN` y `AWS_ACCOUNT_ID`), primer despliegue con `cdk diff` por delante y smoke test de lo que Floci no verifica (bucket policy y OAC, JWT authorizer de Cognito real, **alta y reto de TOTP con Google Authenticator o similar (incluido `staff`), el vencimiento del reto a los 15 minutos y la recuperación con `AdminDeleteSoftwareToken`**, SES en sandbox, cabeceras de CloudFront, Location Service). *Aprender: bootstrap, IAM de mínimo privilegio, OIDC.*
+5. **Flete automático** (hecha en Floci): `PostalCodes`, cálculo del estimado con Location Service y caché de rutas, estimado guardado en la solicitud (`POST /quotes`) y simulador del dashboard. **Sin ruta pública ni UI para el cliente** (decisión del dueño); la ruta `POST /freight/estimate` y la UI del estimado se construyeron y luego se retiraron. *Aprender: Location Service, diseño de reglas de negocio, pruebas.*
+6. **Dashboard: métricas y operación** (hecha en Floci): Resumen (`GET /admin/metrics`), exportar CSV, alarmas y Budgets (`ObservabilityStack`), optimización de imágenes (Lambda `media-variants` al subir a S3).
+
+> **Estado (2026-11-26):** las fases 1 a 6 están hechas y probadas en Floci; además se añadió el **IVA por cotización** (5.5). Se implementó el **MFA TOTP** del dashboard (4 y 10), aún sin probar en navegador ni en AWS real. Las fases 5 y 6 se adelantaron al hito de AWS real, que sigue **pendiente**, igual que la invitación de usuarios (`POST /admin/users/invite`). Los datos son de ejemplo (tarifas, pesos, CPs, fotos).
 7. **Después**: pago en línea (Mercado Pago o Stripe) con Lambda + webhooks, pedidos y facturación.
 
 ## 12. Información pendiente del dueño (bloquea datos reales)
@@ -361,10 +365,10 @@ canteras-naturales/
 2. Camiones que usan y capacidad (t); si el costo es ida o ida y vuelta; si cobran descarga/maniobras.
 3. Pesos reales o densidad por piedra y formato; espesores disponibles.
 4. Dirección exacta del patio (lat/lng) y zonas de entrega (estados, CPs, distancia máxima).
-5. Lista completa de las 18 piedras, 9 acabados, 7 servicios y proyectos con fotos.
+5. Lista completa de las 18 piedras, 9 acabados, 7 servicios y proyectos con fotos (el dueño las conseguirá después; mientras tanto hay texturas ilustrativas, 6.3).
 6. Dominio deseado, correo remitente (ej. `ventas@canterasnaturales.mx`) y número de WhatsApp.
 7. Texto del aviso de privacidad.
-8. Quién usará el dashboard (correos para `owner` y `staff`), si usan IVA en las cotizaciones y cómo quieren el formato del correo de cotización final (logo, firma, condiciones, vigencia). *(Proyecto académico: decidir con valores de ejemplo y registrar la decisión en el README.)*
+8. Quién usará el dashboard (correos para `owner` y `staff`) y cómo quieren el formato del correo de cotización final (logo, firma, condiciones, vigencia). *(El IVA ya está decidido: por cotización, solo sobre la piedra, 5.5.)* *(Proyecto académico: decidir con valores de ejemplo y registrar la decisión en el README.)*
 9. Qué métricas le importan más al dueño (ej. tiempo de respuesta, piedras más pedidas, zonas, conversión).
 
 ## 13. Cómo trabajar conmigo (instrucciones para Claude Code)
@@ -375,6 +379,9 @@ canteras-naturales/
 - No despliegues a `prod` ni crees recursos con costo sin avisarme antes. Siempre muestra `cdk diff` antes de `cdk deploy`.
 - Si algo del diseño no está claro, abre el artifact de diseño y respétalo; si hay conflicto entre diseño y esta guía, pregúntame.
 - **Commits:** los hago yo. No ejecutes comandos git que modifiquen el repo (`init`, `add`, `commit`, `push`); deja los cambios en el árbol de trabajo y, si ayuda, sugiere cómo partirlos en commits convencionales.
+- **Despliegues y siembra:** los corro yo (también en Floci); dame el comando y qué hace.
+- **Cambios de seguridad, dinero o superficie pública:** TDD estricto y una revisión adversarial de contexto fresco antes de dar el trabajo por terminado.
+- **Relevo entre sesiones:** el estado y los pendientes viven en `docs/siguiente-sesion.md`; la guía de pruebas, en `docs/levantar-y-probar.md`.
 
 ## 14. Idioma (español de México)
 Esta regla **tiene prioridad** sobre el valor por defecto de escribir artefactos en inglés.
