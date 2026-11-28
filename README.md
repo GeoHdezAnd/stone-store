@@ -34,7 +34,7 @@ Orden de fases (el dashboard del dueño va antes que el sitio público; detalle 
 1. **Fundamentos e infraestructura de hosting**:
    - [x] T0: repo, workspaces, TypeScript, lint con reglas de dependencias, pruebas y esqueleto de `infra`.
    - [x] T1: `SiteStack` en CDK (S3 privado + CloudFront con OAC) con página provisional, probado en Floci. Lo que Floci no verifica (rechazo de lectura directa al bucket, OAC real) se comprueba en el hito de salida a AWS real.
-   - [x] T2: CI/CD con GitHub Actions y OIDC (`CiStack`, `ci.yml`, `deploy.yml`), con tests de síntesis. `deploy.yml` queda dormido hasta el hito de salida.
+   - [x] T2: CI/CD con GitHub Actions y OIDC (`CiStack`, `ci.yml`, `deploy.yml`, `site-build.yml`), con tests de síntesis. `deploy.yml` y `site-build.yml` quedan dormidos hasta el hito de salida.
 2. Autenticación y dashboard: catálogo y configuración (Cognito, DynamoDB, API de administración, `apps/admin`).
 3. Dashboard: publicar, tarifas y solicitudes.
 4. Sitio público y formulario de cotización.
@@ -89,7 +89,8 @@ npx tsx scripts/seed.ts
 > **Estado:** `ci.yml` ya corre (no usa AWS). Todo lo demás de esta sección (`deploy.yml`, el environment, las variables y `CiStack` en AWS) está **dormido** hasta el hito de salida a AWS real, cuando exista la cuenta nueva y el MVP esté probado en Floci.
 
 - `ci.yml`: typecheck, lint, formato, pruebas y `cdk synth` en cada PR y push a `main`. No usa credenciales de AWS.
-- `deploy.yml`: despliegue manual a `dev`. Primero `accion=diff` (imprime el SHA), luego `accion=deploy` pegando ese SHA en `sha_revisado`.
+- `deploy.yml`: despliegue manual a `dev`. Primero `accion=diff` (imprime el SHA), luego `accion=deploy` pegando ese SHA en `sha_revisado`. Solo sube el sitio provisional «En construcción» si marcas `subir_placeholder` (por defecto no; solo para el primer despliegue, nunca sobre un sitio con contenido).
+- `site-build.yml`: reconstruye `apps/web` con el catálogo publicado y lo sube a S3. Lo dispara la Lambda `AdminPublish` al publicar o revertir (`workflow_dispatch`, con un PAT fine-grained guardado en SSM), solo sobre `main`, con el environment `site-rebuild-dev` (**sin revisores**, solo rama `main`, sin bypass de admins) y un rol OIDC propio que solo puede subir al bucket del sitio e invalidar su distribución. Variables del environment: `SITE_CATALOG_URL`, `SITE_PUBLIC_URL`, `SITE_API_URL`, `SITE_TURNSTILE_SITE_KEY`, `SITE_REBUILD_ROLE_ARN` y `AWS_ACCOUNT_ID`.
 - `CiStack` (`canteras-ci-dev`) crea el proveedor OIDC y el rol que asume el workflow. **Se despliega a mano, nunca desde CI.**
 
 **Configuración en GitHub que el código no puede hacer** (sin esto el despliegue NO es seguro):
