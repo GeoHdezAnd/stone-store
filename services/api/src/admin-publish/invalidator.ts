@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { CreateInvalidationCommand, type CloudFrontClient } from '@aws-sdk/client-cloudfront';
 
+/**
+ * Configuración del `CloudFrontClient` de esta Lambda: sin ella el SDK espera sin límite y reintenta.
+ * Peor caso: 1 intento × (1 s de conexión + 2 s de petición) = 3 s (mismo patrón que
+ * `SES_CLIENT_CONFIG` en `quotes-create/budget.ts`; las opciones son de `NodeHttpHandlerOptions`).
+ */
+export const CLOUDFRONT_CLIENT_CONFIG = {
+  maxAttempts: 1,
+  requestHandler: { requestTimeout: 2000, connectionTimeout: 1000 },
+} as const;
+
 export type InvalidationResult = 'ok' | 'skipped';
 
 /**

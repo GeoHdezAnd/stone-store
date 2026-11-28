@@ -30,6 +30,7 @@ import {
   type PublicationRow,
   type PublishRepository,
 } from './repository';
+import type { SiteRebuilder } from './site-rebuild';
 import {
   immutableKey,
   ObjectExistsError,
@@ -41,10 +42,26 @@ export interface PublishDeps {
   repo: PublishRepository;
   storage: PublishStorage;
   invalidator: Invalidator;
+  /** Pide reconstruir el sitio público (best-effort; `NoopRebuilder` si no está configurado). */
+  rebuilder: SiteRebuilder;
   sha256: Sha256Hex;
   /** Para pruebas: reloj. */
   now?: () => Date;
+  /** Para pruebas: plazo de la invalidación (por defecto `INVALIDATION_TIMEOUT_MS`). */
+  invalidationTimeoutMs?: number;
 }
+
+/**
+ * Presupuesto de tiempo: la Lambda `AdminPublish` tiene 10 s (`infra/lib/api-stack.ts`). Peor caso:
+ *   invalidación de CloudFront   3 000 ms  (aquí; además el cliente tiene 1 intento y 3 s en total)
+ *   pedido de reconstrucción     3 000 ms  (`REBUILD_TIMEOUT_MS`, incluye la lectura de SSM)
+ *   resto                        1 500 ms  (~10 llamadas a DynamoDB/S3 de unos pocos ms, arranque en frío)
+ *   -------------------------------------------------------
+ *   total                        7 500 ms  -> margen de 2 500 ms bajo los 10 s.
+ * Ambos pasos son best-effort: si se agotan, la publicación (ya confirmada) responde 200 con
+ * `invalidation: failed` / `rebuild: failed` en vez de expirar y devolver un 5xx.
+ */
+export const INVALIDATION_TIMEOUT_MS = 3000;
 
 /** Ruta del sitio que CloudFront debe olvidar tras publicar. */
 export const INVALIDATION_PATHS = ['/published/catalog.json'] as const;
@@ -53,6 +70,7 @@ const HISTORY_LIMIT = 20;
 const PENDING_LIMIT = 100;
 
 type InvalidationStatus = 'ok' | 'skipped' | 'failed';
+type RebuildStatus = 'requested' | 'failed' | 'not_configured';
 
 const formatVersion = (n: number): string => `v${String(n).padStart(4, '0')}`;
 const sequenceOf = (version: string): number => Number(version.slice(1));
@@ -100,16 +118,54 @@ function parseRows<T>(
 }
 
 export function createPublishRoutes(deps: PublishDeps): Route[] {
-  const { repo, storage, invalidator, sha256 } = deps;
+  const { repo, storage, invalidator, rebuilder, sha256 } = deps;
   const now = deps.now ?? (() => new Date());
+  const invalidationTimeoutMs = deps.invalidationTimeoutMs ?? INVALIDATION_TIMEOUT_MS;
 
   /** Invalidación sin romper la publicación: un fallo se registra (sin detalles) y se informa. */
   async function invalidate(ctx: HandlerContext): Promise<InvalidationStatus> {
     try {
-      return await invalidator.invalidate(INVALIDATION_PATHS);
+      const work = invalidator.invalidate(INVALIDATION_PATHS);
+      // Si se agota el plazo, la petición original puede rechazar más tarde: no debe quedar sin atender.
+      work.catch(() => undefined);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), invalidationTimeoutMs);
+      });
+      try {
+        return await Promise.race([work, timeout]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     } catch (err) {
       ctx.log.error('invalidation_failed', {
         errName: err instanceof Error ? err.name : 'unknown',
+      });
+      return 'failed';
+    }
+  }
+
+  /**
+   * Pide reconstruir el sitio. BEST-EFFORT: nunca lanza ni falla la publicación. Un fallo se
+   * registra solo con un código corto (`reason`), jamás con el token ni mensajes crudos.
+   */
+  async function requestRebuild(version: string, ctx: HandlerContext): Promise<RebuildStatus> {
+    try {
+      const out = await rebuilder.request({ version, requestId: ctx.requestId });
+      if (out.status === 'failed') {
+        ctx.log.error('site_rebuild_failed', {
+          event: 'site_rebuild_failed',
+          version,
+          reason: out.reason,
+        });
+        return 'failed';
+      }
+      return out.status;
+    } catch {
+      ctx.log.error('site_rebuild_failed', {
+        event: 'site_rebuild_failed',
+        version,
+        reason: 'unexpected',
       });
       return 'failed';
     }
@@ -134,8 +190,14 @@ export function createPublishRoutes(deps: PublishDeps): Route[] {
       });
     }
     const invalidation = await invalidate(ctx);
+    const rebuild = await requestRebuild(current.currentVersion, ctx);
     ctx.log.info('publish_unchanged', { version: current.currentVersion, userId: ctx.userId });
-    return jsonResponse(200, { changed: false, version: current.currentVersion, invalidation });
+    return jsonResponse(200, {
+      changed: false,
+      version: current.currentVersion,
+      invalidation,
+      rebuild,
+    });
   }
 
   /**
@@ -211,10 +273,12 @@ export function createPublishRoutes(deps: PublishDeps): Route[] {
     }
 
     const invalidation = await invalidate(ctx);
+    const rebuild = await requestRebuild(version, ctx);
     ctx.log.info(action === 'publish' ? 'publish' : 'revert', {
       version,
       userId: ctx.userId,
       invalidation,
+      rebuild,
       ...(revertedFrom === undefined ? {} : { revertedFrom }),
     });
     return jsonResponse(200, {
@@ -223,6 +287,7 @@ export function createPublishRoutes(deps: PublishDeps): Route[] {
       publishedAt,
       counts: publication.counts,
       invalidation,
+      rebuild,
       ...(revertedFrom === undefined ? {} : { revertedFrom }),
     });
   }

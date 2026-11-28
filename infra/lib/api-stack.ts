@@ -109,6 +109,57 @@ export interface ApiStackProps extends StackProps {
    * (503 `captcha_not_configured`). Con emulador se ignora: se usa el verificador falso.
    */
   readonly turnstileSecretParam?: string;
+  /**
+   * Reconstrucción del sitio al publicar (CLAUDE.md 5.2): `AdminPublish` dispara un workflow de
+   * GitHub Actions con un token guardado en SSM. Opcional: sin ella (y con emulador) la publicación
+   * funciona igual y responde `rebuild: 'not_configured'`. El token NUNCA va en el entorno: solo el
+   * NOMBRE del parámetro SSM (SecureString), que el dueño crea a mano.
+   */
+  readonly siteRebuild?: SiteRebuildProps;
+}
+
+export interface SiteRebuildProps {
+  /** Nombre (`/ruta/nombre`) del parámetro SSM SecureString con el token de GitHub. */
+  tokenParam: string;
+  /** `<dueño>/<repositorio>` que contiene el workflow. */
+  repository: string;
+  /** Archivo del workflow, p. ej. `site-build.yml`. */
+  workflowFile: string;
+  /** Rama donde corre el workflow (por defecto `main`). */
+  ref?: string;
+}
+
+// (Mismos criterios que `services/api/src/admin-publish/site-rebuild.ts`; infra no importa runtime.)
+const REBUILD_REPOSITORY_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const REBUILD_WORKFLOW_RE = /^[A-Za-z0-9._-]+\.ya?ml$/;
+const REBUILD_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+
+/** Valida la configuración de reconstrucción y devuelve la rama efectiva. */
+function validateSiteRebuild(rebuild: SiteRebuildProps): Required<SiteRebuildProps> {
+  const ref = rebuild.ref ?? 'main';
+  const dots = (v: string): boolean => v.includes('..');
+  if (rebuild.tokenParam.length > 1011 || !SSM_PARAM_NAME_RE.test(rebuild.tokenParam)) {
+    throw new Error(
+      'SITE_REBUILD_TOKEN_PARAM no es un nombre de parámetro SSM válido para la reconstrucción del sitio: usa /ruta/nombre, sin comodines.',
+    );
+  }
+  if (
+    !REBUILD_REPOSITORY_RE.test(rebuild.repository) ||
+    rebuild.repository.split('/').some((x) => x === '.' || x === '..')
+  ) {
+    throw new Error(
+      'SITE_REBUILD_REPOSITORY (reconstrucción del sitio) debe ser <dueño>/<repositorio>.',
+    );
+  }
+  if (!REBUILD_WORKFLOW_RE.test(rebuild.workflowFile) || dots(rebuild.workflowFile)) {
+    throw new Error(
+      'SITE_REBUILD_WORKFLOW (reconstrucción del sitio) debe ser un archivo .yml o .yaml.',
+    );
+  }
+  if (!REBUILD_REF_RE.test(ref) || dots(ref)) {
+    throw new Error('SITE_REBUILD_REF (reconstrucción del sitio) no es una rama válida.');
+  }
+  return { ...rebuild, ref };
 }
 
 // Identidad de SES concreta (sin comodines).
@@ -222,6 +273,7 @@ export class ApiStack extends Stack {
       siteOrigins,
       adminBaseUrl,
       turnstileSecretParam,
+      siteRebuild,
       ...stackProps
     } = props;
     super(scope, id, stackProps);
@@ -247,6 +299,25 @@ export class ApiStack extends Stack {
       throw new Error(
         'TURNSTILE_SECRET_PARAM no es un nombre de parámetro SSM válido: usa /ruta/nombre, sin comodines.',
       );
+    }
+    // Se valida SIEMPRE (también con emulador) para que un error de configuración no pase desapercibido.
+    const rebuildConfig = siteRebuild === undefined ? undefined : validateSiteRebuild(siteRebuild);
+    if (rebuildConfig !== undefined) {
+      // FALLA CERRADO. `site-build.yml` y su environment están fijos a `dev`: en otro entorno la
+      // Lambda dispararía el workflow de dev (y el rol de rebuild de ese entorno no coincidiría).
+      // Cuando exista un workflow de prod, se parametrizará.
+      if (deploy.name !== 'dev') {
+        throw new Error(
+          'La reconstrucción automática del sitio solo está definida para dev; falta el workflow y el environment de prod.',
+        );
+      }
+      // Sin la distribución no se crea `SiteRebuildRole` (ver `CiStack`) y el workflow fallaría
+      // sin que el dueño se entere mientras la API responde `requested`.
+      if (!deploy.emulated && (siteDistributionId === undefined || siteDistributionId === '')) {
+        throw new Error(
+          'La reconstrucción automática del sitio exige SITE_DISTRIBUTION_ID: sin él no existe el rol de CI que sube el sitio.',
+        );
+      }
     }
     const adminBase = adminBaseUrl === undefined ? undefined : validateAdminBaseUrl(adminBaseUrl);
 
@@ -470,6 +541,30 @@ export class ApiStack extends Stack {
     adminPublish.addEnvironment('PUBLISH_BUCKET', publishBucket.bucketName);
     if (siteDistributionId !== undefined && siteDistributionId !== '') {
       adminPublish.addEnvironment('SITE_DISTRIBUTION_ID', siteDistributionId);
+    }
+    // Reconstrucción del sitio: SOLO fuera del emulador (allí no hay GitHub ni SSM real). La Lambda
+    // lee el token con `ssm:GetParameter` sobre el ARN EXACTO del parámetro (sin comodines). No se da
+    // `kms:Decrypt` mientras el parámetro use la clave administrada `aws/ssm` (su política de clave ya
+    // permite el descifrado a quien pueda leer el parámetro vía SSM); si algún día se usa una clave
+    // propia (CMK), habrá que añadir `kms:Decrypt` sobre ESA clave.
+    if (rebuildConfig !== undefined && !deploy.emulated) {
+      adminPublish.addEnvironment('SITE_REBUILD_TOKEN_PARAM', rebuildConfig.tokenParam);
+      adminPublish.addEnvironment('SITE_REBUILD_REPOSITORY', rebuildConfig.repository);
+      adminPublish.addEnvironment('SITE_REBUILD_WORKFLOW', rebuildConfig.workflowFile);
+      adminPublish.addEnvironment('SITE_REBUILD_REF', rebuildConfig.ref);
+      adminPublish.addToRolePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ['ssm:GetParameter'],
+          resources: [
+            this.formatArn({
+              service: 'ssm',
+              resource: 'parameter',
+              resourceName: rebuildConfig.tokenParam.slice(1),
+            }),
+          ],
+        }),
+      );
     }
     adminPublish.addToRolePolicy(
       new PolicyStatement({

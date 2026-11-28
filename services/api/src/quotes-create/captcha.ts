@@ -1,5 +1,8 @@
-import { GetParameterCommand } from '@aws-sdk/client-ssm';
 import type { SdkClient } from '../lib/mailer';
+import { SsmSecretProvider } from '../lib/ssm-secret';
+
+// Se reexporta para no cambiar la superficie del módulo (ver `lib/ssm-secret.ts`).
+export { SsmSecretProvider };
 
 // Verificación anti-spam (Cloudflare Turnstile) detrás de una interfaz. Principio: FALLA CERRADO.
 // Cualquier error (red, timeout, SSM, respuesta rara) cuenta como «no verificado».
@@ -121,38 +124,6 @@ export class TurnstileVerifier implements CaptchaVerifier {
     } finally {
       if (timer !== undefined) clearTimeout(timer);
     }
-  }
-}
-
-const SECRET_TTL_MS = 5 * 60 * 1000;
-
-/**
- * Lee el secreto de Turnstile de SSM Parameter Store (SecureString, `WithDecryption: true`) y lo
- * guarda en memoria 5 minutos. El valor nunca va a logs ni a variables de entorno. Un error no se cachea.
- */
-export class SsmSecretProvider {
-  private cached: { value: string; expiresAt: number } | null = null;
-  private readonly now: () => number;
-
-  constructor(
-    private readonly client: SdkClient,
-    private readonly name: string,
-    options: { now?: () => number } = {},
-  ) {
-    this.now = options.now ?? (() => Date.now());
-  }
-
-  async get(): Promise<string> {
-    if (this.cached !== null && this.now() < this.cached.expiresAt) return this.cached.value;
-    const out = (await this.client.send(
-      new GetParameterCommand({ Name: this.name, WithDecryption: true }),
-    )) as { Parameter?: { Value?: unknown } };
-    const value = out.Parameter?.Value;
-    if (typeof value !== 'string' || value === '') {
-      throw new Error('El parámetro del secreto de Turnstile no tiene valor.');
-    }
-    this.cached = { value, expiresAt: this.now() + SECRET_TTL_MS };
-    return value;
   }
 }
 

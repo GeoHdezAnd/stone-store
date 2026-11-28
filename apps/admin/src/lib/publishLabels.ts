@@ -1,4 +1,4 @@
-import type { InvalidationStatus, PublicationAction } from '../api/publishApi';
+import type { InvalidationStatus, PublicationAction, RebuildStatus } from '../api/publishApi';
 
 const ENTITY_LABELS: Record<string, string> = {
   stone: 'Piedra',
@@ -51,4 +51,28 @@ export function invalidationNotice(
     };
   }
   return null;
+}
+
+/**
+ * Aviso sobre la reconstrucción automática del sitio. Los textos NO repiten «publicado»: ya lo dice
+ * el aviso emergente de la acción (publicar, revertir o «sin cambios»). Sin el campo (API anterior)
+ * no se muestra nada.
+ */
+export function rebuildNotice(
+  status: RebuildStatus | undefined,
+): { tone: 'info' | 'error'; text: string } | null {
+  if (status === undefined) return null;
+  if (status === 'requested') {
+    return { tone: 'info', text: 'El sitio se está actualizando; tarda unos minutos.' };
+  }
+  if (status === 'failed') {
+    return {
+      tone: 'error',
+      text: 'No se pudo pedir la actualización del sitio. Vuelve a publicar para reintentar o avísale al administrador.',
+    };
+  }
+  return {
+    tone: 'info',
+    text: 'Actualización automática del sitio no configurada: el sitio no cambia hasta reconstruirlo.',
+  };
 }

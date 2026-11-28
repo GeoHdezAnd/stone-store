@@ -4,9 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { finish, project, service, stone } from '../../admin-catalog/test/fixtures';
 import { mailSettings, publicSettings } from '../../admin-settings/test/fixtures';
 import type { Invalidator } from '../invalidator';
+import type { RebuildOutcome, SiteRebuilder } from '../site-rebuild';
 import { MemoryPublishRepository } from './memory-repository';
 import { MemoryPublishStorage } from '../memory-storage';
-import { createPublishRouter } from '../routes';
+import { createPublishRouter, INVALIDATION_TIMEOUT_MS } from '../routes';
 import { sha256Hex } from '../sha256';
 
 type Ev = APIGatewayProxyEventV2WithJWTAuthorizer;
@@ -50,7 +51,20 @@ class FakeInvalidator implements Invalidator {
   }
 }
 
-function setup() {
+const TOKEN_CENTINELA = 'github_pat_CENTINELA_NO_DEBE_SALIR';
+
+class FakeRebuilder implements SiteRebuilder {
+  readonly calls: { version: string; requestId: string }[] = [];
+  outcome: RebuildOutcome = { status: 'requested' };
+  error: Error | null = null;
+  async request(input: { version: string; requestId: string }) {
+    this.calls.push(input);
+    if (this.error) throw this.error;
+    return this.outcome;
+  }
+}
+
+function setup(over: { invalidationTimeoutMs?: number } = {}) {
   tick = 0;
   const repo = new MemoryPublishRepository();
   repo.catalog = {
@@ -62,9 +76,10 @@ function setup() {
   };
   const storage = new MemoryPublishStorage();
   const invalidator = new FakeInvalidator();
+  const rebuilder = new FakeRebuilder();
   const lines: string[] = [];
   const router = createPublishRouter(
-    { repo, storage, invalidator, sha256: sha256Hex, now: clock },
+    { repo, storage, invalidator, rebuilder, sha256: sha256Hex, now: clock, ...over },
     { logSink: (l) => lines.push(l) },
   );
   const call = async (c: Call) => {
@@ -77,7 +92,7 @@ function setup() {
   };
   const publish = (groups?: string) =>
     call({ method: 'POST', path: '/admin/publish', groups: groups ?? '[owner]' });
-  return { repo, storage, invalidator, lines, call, publish };
+  return { repo, storage, invalidator, rebuilder, lines, call, publish };
 }
 
 const OBJ = (v: string) => `published/${v}/catalog.json`;
@@ -590,5 +605,187 @@ describe('logs', () => {
     expect(todo).toContain('publish');
     expect(todo).not.toContain('525512345678');
     expect(todo).not.toContain('ventas@ejemplo.test');
+  });
+});
+
+describe('presupuesto de tiempo de la invalidación', () => {
+  it('una invalidación colgada NO bloquea la publicación: invalidation failed, 200 y la reconstrucción sigue', async () => {
+    const { invalidator, rebuilder, lines, publish } = setup({ invalidationTimeoutMs: 20 });
+    invalidator.invalidate = () => new Promise(() => undefined);
+    const t0 = Date.now();
+    const r = await publish();
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ changed: true, invalidation: 'failed', rebuild: 'requested' });
+    expect(rebuilder.calls).toHaveLength(1);
+    expect(lines.join('\n')).toContain('invalidation_failed');
+  });
+
+  it('también en «sin cambios»', async () => {
+    const { invalidator, publish } = setup({ invalidationTimeoutMs: 20 });
+    await publish();
+    invalidator.invalidate = () => new Promise(() => undefined);
+    const r = await publish();
+    expect(r.json).toMatchObject({ changed: false, invalidation: 'failed' });
+  });
+
+  it('el plazo por defecto es de 3 s', () => {
+    expect(INVALIDATION_TIMEOUT_MS).toBe(3000);
+  });
+});
+
+describe('reconstrucción del sitio al publicar', () => {
+  async function conDosVersiones() {
+    const s = setup();
+    await s.publish(); // v0001
+    s.repo.catalog.stones = [stone({ nombre: 'Arenisca fina' })];
+    await s.publish(); // v0002
+    s.rebuilder.calls.length = 0;
+    return s;
+  }
+
+  it('publicar pide UNA reconstrucción con la versión y el requestId, y lo informa', async () => {
+    const { rebuilder, publish } = setup();
+    const r = await publish();
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ changed: true, version: 'v0001', rebuild: 'requested' });
+    expect(rebuilder.calls).toEqual([{ version: 'v0001', requestId: 'req-1' }]);
+  });
+
+  it('se pide DESPUÉS de la invalidación', async () => {
+    const { invalidator, rebuilder, publish } = setup();
+    const orden: string[] = [];
+    const inv = invalidator.invalidate.bind(invalidator);
+    invalidator.invalidate = async (p) => {
+      orden.push('invalidate');
+      return inv(p);
+    };
+    const req = rebuilder.request.bind(rebuilder);
+    rebuilder.request = async (i) => {
+      orden.push('rebuild');
+      return req(i);
+    };
+    await publish();
+    expect(orden).toEqual(['invalidate', 'rebuild']);
+  });
+
+  it('revertir pide la reconstrucción con la versión NUEVA', async () => {
+    const { rebuilder, call } = await conDosVersiones();
+    const r = await call({ method: 'POST', path: '/admin/publications/v0001/revert' });
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ changed: true, version: 'v0003', rebuild: 'requested' });
+    expect(rebuilder.calls).toEqual([{ version: 'v0003', requestId: 'req-1' }]);
+  });
+
+  it('la ruta «sin cambios» también la pide (sirve de reintento)', async () => {
+    const { rebuilder, publish } = setup();
+    await publish();
+    rebuilder.calls.length = 0;
+    const r = await publish();
+    expect(r.json).toMatchObject({ changed: false, version: 'v0001', rebuild: 'requested' });
+    expect(rebuilder.calls).toEqual([{ version: 'v0001', requestId: 'req-1' }]);
+  });
+
+  it.each([
+    ['failed', { status: 'failed', reason: 'http_403' } as RebuildOutcome, 'failed'],
+    ['not_configured', { status: 'not_configured' } as RebuildOutcome, 'not_configured'],
+  ])('«sin cambios» informa el resultado del rebuilder (%s)', async (_n, outcome, esperado) => {
+    const { rebuilder, publish } = setup();
+    await publish();
+    rebuilder.outcome = outcome;
+    const r = await publish();
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ changed: false, rebuild: esperado });
+  });
+
+  it('«sin cambios» con un rebuilder que lanza: 200 con rebuild failed', async () => {
+    const { rebuilder, publish } = setup();
+    await publish();
+    rebuilder.error = new Error('boom');
+    const r = await publish();
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ changed: false, rebuild: 'failed' });
+  });
+
+  it('revertir a la versión vigente («sin cambios») también la pide', async () => {
+    const { rebuilder, call } = await conDosVersiones();
+    const r = await call({ method: 'POST', path: '/admin/publications/v0002/revert' });
+    expect(r.json).toMatchObject({ changed: false, version: 'v0002', rebuild: 'requested' });
+    expect(rebuilder.calls).toEqual([{ version: 'v0002', requestId: 'req-1' }]);
+  });
+
+  it('NO se pide tras un 502 de copia (publicar, revertir ni «sin cambios»)', async () => {
+    const s = await conDosVersiones();
+    s.storage.failCopy = new Error('S3 caído');
+    s.repo.catalog.stones = [stone({ nombre: 'Arenisca gruesa' })];
+    expect((await s.publish()).status).toBe(502);
+    expect(
+      (await s.call({ method: 'POST', path: '/admin/publications/v0001/revert' })).status,
+    ).toBe(502);
+    // Con CURRENT ya consistente, «sin cambios» también falla la copia.
+    expect((await s.publish()).status).toBe(502);
+    expect(s.rebuilder.calls).toEqual([]);
+  });
+
+  it('«sin cambios» con un 502 de copia (healCurrent) tampoco la pide', async () => {
+    const { storage, rebuilder, publish } = setup();
+    await publish();
+    rebuilder.calls.length = 0;
+    storage.failCopy = new Error('S3 caído');
+    expect((await publish()).status).toBe(502);
+    expect(rebuilder.calls).toEqual([]);
+  });
+
+  it('si el rebuilder LANZA: 200 con rebuild failed y se registra solo un código', async () => {
+    const { rebuilder, lines, publish } = setup();
+    rebuilder.error = new Error(`fallo con ${TOKEN_CENTINELA}`);
+    const r = await publish();
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ changed: true, version: 'v0001', rebuild: 'failed' });
+    const todo = lines.join('\n');
+    expect(todo).toContain('site_rebuild_failed');
+    expect(todo).not.toContain(TOKEN_CENTINELA);
+    expect(r.text).not.toContain(TOKEN_CENTINELA);
+  });
+
+  it('si el rebuilder informa failed: 200 con rebuild failed y el motivo SOLO en el log', async () => {
+    const { rebuilder, lines, publish } = setup();
+    rebuilder.outcome = { status: 'failed', reason: 'http_403' };
+    const r = await publish();
+    expect(r.status).toBe(200);
+    expect(r.json.rebuild).toBe('failed');
+    expect(r.text).not.toContain('http_403');
+    const linea = lines.map((l) => JSON.parse(l)).find((l) => l.msg === 'site_rebuild_failed');
+    expect(linea).toMatchObject({ version: 'v0001', requestId: 'req-1', reason: 'http_403' });
+  });
+
+  it('sin configuración (Noop) responde not_configured', async () => {
+    const { rebuilder, publish } = setup();
+    rebuilder.outcome = { status: 'not_configured' };
+    const r = await publish();
+    expect(r.status).toBe(200);
+    expect(r.json.rebuild).toBe('not_configured');
+  });
+
+  it('staff: 403 y no se pide nada', async () => {
+    const { rebuilder, call } = setup();
+    expect((await call({ method: 'POST', path: '/admin/publish', groups: '[staff]' })).status).toBe(
+      403,
+    );
+    expect(
+      (await call({ method: 'POST', path: '/admin/publications/v0001/revert', groups: '[staff]' }))
+        .status,
+    ).toBe(403);
+    expect(rebuilder.calls).toEqual([]);
+  });
+
+  it('el token (centinela) no aparece en logs, respuesta ni auditoría', async () => {
+    const { repo, rebuilder, lines, publish } = setup();
+    rebuilder.outcome = { status: 'failed', reason: 'http_401' };
+    const r = await publish();
+    expect(lines.join('\n')).not.toContain(TOKEN_CENTINELA);
+    expect(r.text).not.toContain(TOKEN_CENTINELA);
+    expect(JSON.stringify(repo.audits)).not.toContain(TOKEN_CENTINELA);
+    expect(JSON.stringify(repo.audits)).not.toContain('rebuild');
   });
 });

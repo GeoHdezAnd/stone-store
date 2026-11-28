@@ -1,0 +1,100 @@
+# Reconstruye el sitio público con el catálogo ya publicado y lo sube al bucket del sitio.
+#
+# Lo dispara la Lambda de publicación (`AdminPublish`) con `workflow_dispatch` cada vez que el dueño
+# publica o revierte el catálogo en el dashboard (CLAUDE.md 5.2). También se puede correr a mano
+# desde la pestaña Actions (con `version` vacía no se exige una versión mínima).
+#
+# Seguridad (esto corre SIN aprobación manual, a diferencia de `deploy.yml`):
+#   - environment `site-rebuild-dev`: SIN revisores, restringido a la rama `main`, sin bypass de admins.
+#   - Rol de AWS propio (`SiteRebuildRole`, variable SITE_REBUILD_ROLE_ARN del environment): solo
+#     lee las salidas del stack del sitio, escribe/borra en el bucket del sitio e invalida SU
+#     distribución. No puede tocar la infraestructura.
+#   - Las variables del environment NO son secretas (URLs públicas y la clave de SITIO de Turnstile).
+#   - `version` llega por `env`, nunca interpolada dentro de `run:` (evita inyección de comandos).
+name: Reconstruir sitio (dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión mínima del catálogo (vNNNN) que debe leer el build; vacío = cualquiera'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# Ráfagas de publicaciones: una ejecución en curso (no se interrumpe a medio sync) y, como mucho,
+# UNA pendiente; una nueva reemplaza a la pendiente. Aun así la pendiente exige su versión mínima,
+# que es igual o mayor a la de la ejecución que reemplaza.
+concurrency:
+  group: site-rebuild-dev
+  cancel-in-progress: false
+
+jobs:
+  build:
+    environment: site-rebuild-dev
+    # No sustituye la restricción de ramas del environment (un YAML en otra rama podría quitar
+    # este `if`); es una segunda barrera.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      APP_ENV: dev
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # Con `id-token: write` el token OIDC queda al alcance de TODOS los pasos del job. Sin
+      # `--ignore-scripts`, el `postinstall` de una dependencia podría pedirlo y asumir el rol.
+      - name: Instalar dependencias (sin scripts de npm)
+        run: npm ci --ignore-scripts
+
+      # El build va ANTES de pedir credenciales de AWS: si el catálogo no se puede leer, es más
+      # viejo que `version` o no cumple el esquema, falla aquí (CATALOG_REQUIRED=1 prohíbe caer
+      # al seed de `content/` en silencio) y no se sube nada.
+      - name: Construir el sitio
+        env:
+          CATALOG_URL: ${{ vars.SITE_CATALOG_URL }}
+          CATALOG_REQUIRED: '1'
+          CATALOG_MIN_VERSION: ${{ inputs.version }}
+          PUBLIC_SITE_URL: ${{ vars.SITE_PUBLIC_URL }}
+          PUBLIC_API_URL: ${{ vars.SITE_API_URL }}
+          PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.SITE_TURNSTILE_SITE_KEY }}
+        run: |
+          for nombre in CATALOG_URL PUBLIC_SITE_URL PUBLIC_API_URL PUBLIC_TURNSTILE_SITE_KEY; do
+            if [ -z "${!nombre}" ]; then
+              echo "::error::Falta la variable del environment para $nombre"
+              exit 1
+            fi
+          done
+          npm run build -w @canteras/web
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.SITE_REBUILD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Los logs de un repo público son públicos: se compara la cuenta sin imprimirla.
+      - name: Verificar la cuenta de AWS
+        env:
+          CUENTA_ESPERADA: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          actual="$(aws sts get-caller-identity --query Account --output text)"
+          if [ -z "$CUENTA_ESPERADA" ] || [ "$actual" != "$CUENTA_ESPERADA" ]; then
+            echo "::error::La cuenta de las credenciales no coincide con la variable AWS_ACCOUNT_ID."
+            exit 1
+          fi
+
+      - name: Subir el sitio e invalidar CloudFront
+        run: npx tsx scripts/sync-site.ts apps/web/dist

@@ -13,6 +13,9 @@ export type PublicationAction = 'publish' | 'revert';
 /** Resultado de la invalidación de caché de CloudFront. */
 export type InvalidationStatus = 'ok' | 'skipped' | 'failed';
 
+/** Pedido de reconstrucción del sitio (nunca trae detalles internos). */
+export type RebuildStatus = 'requested' | 'failed' | 'not_configured';
+
 export interface CurrentPublication {
   version: string;
   action: PublicationAction;
@@ -47,9 +50,11 @@ export type PublishResult =
       publishedAt: string;
       counts: PublicationCounts;
       invalidation: InvalidationStatus;
+      /** Ausente en una API anterior a la reconstrucción automática. */
+      rebuild?: RebuildStatus;
       revertedFrom?: string;
     }
-  | { changed: false; version: string; invalidation: InvalidationStatus };
+  | { changed: false; version: string; invalidation: InvalidationStatus; rebuild?: RebuildStatus };
 
 export interface PublishApi {
   list(): Promise<PublicationsSnapshot>;

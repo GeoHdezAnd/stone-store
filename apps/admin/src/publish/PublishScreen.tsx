@@ -9,7 +9,7 @@ import { PageHeader } from '../components/PageHeader';
 import { useAsyncResource } from '../hooks/useAsyncResource';
 import { usePermissions } from '../hooks/usePermissions';
 import { useToastedAction } from '../hooks/useToastedAction';
-import { invalidationNotice } from '../lib/publishLabels';
+import { invalidationNotice, rebuildNotice } from '../lib/publishLabels';
 import { CurrentVersionCard } from './CurrentVersionCard';
 import { PendingChanges } from './PendingChanges';
 import { PublicationHistory } from './PublicationHistory';
@@ -29,7 +29,10 @@ export function PublishScreen() {
 
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [problem, setProblem] = useState<Problem>(null);
-  const [outcome, setOutcome] = useState<ReturnType<typeof invalidationNotice>>(null);
+  // Avisos del último resultado: invalidación de caché (si hubo algo que decir) y reconstrucción del sitio.
+  const [outcomes, setOutcomes] = useState<NonNullable<ReturnType<typeof invalidationNotice>>[]>(
+    [],
+  );
 
   /** Ejecuta publicar/revertir con toast, muestra el resultado y refresca sin salir de la página. */
   async function execute(
@@ -42,7 +45,7 @@ export function PublishScreen() {
     },
   ) {
     setProblem(null);
-    setOutcome(null);
+    setOutcomes([]);
     try {
       const result = await run(action, {
         loading: messages.loading,
@@ -52,7 +55,9 @@ export function PublishScreen() {
             ? 'Otra persona publicó antes que tú. Recarga para ver lo último.'
             : describeError(err),
       });
-      setOutcome(invalidationNotice(result.invalidation));
+      const invalidation = invalidationNotice(result.invalidation);
+      const rebuild = rebuildNotice(result.rebuild);
+      setOutcomes([...(invalidation ? [invalidation] : []), ...(rebuild ? [rebuild] : [])]);
     } catch (err) {
       if (err instanceof ApiError && err.code === 'conflict') setProblem({ kind: 'conflict' });
       else if (err instanceof ApiError && err.code === 'copy_failed')
@@ -124,7 +129,11 @@ export function PublishScreen() {
           ) : null}
         </Notice>
       ) : null}
-      {outcome ? <Notice tone={outcome.tone}>{outcome.text}</Notice> : null}
+      {outcomes.map((o) => (
+        <Notice key={o.text} tone={o.tone}>
+          {o.text}
+        </Notice>
+      ))}
 
       {state.status === 'loading' ? (
         <p className="state" role="status">

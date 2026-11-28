@@ -2,6 +2,7 @@ import { CfnOutput, Duration, Stack, type StackProps } from 'aws-cdk-lib';
 import { CfnOIDCProvider, FederatedPrincipal, PolicyStatement, Role } from 'aws-cdk-lib/aws-iam';
 import { type Construct } from 'constructs';
 
+import { parseSiteDistributionId } from './cdn-grant.js';
 import { type DeployEnv } from './config.js';
 
 /** Calificador del bootstrap por defecto de CDK (aparece en los nombres `cdk-<calificador>-…`). */
@@ -27,6 +28,12 @@ export interface CiStackProps extends StackProps {
    * y cuenta: si ya hay uno, se reutiliza en lugar de crear otro.
    */
   readonly existingOidcProviderArn?: string;
+  /**
+   * Id de la distribución de CloudFront del sitio (`SITE_DISTRIBUTION_ID`). Con él se crea
+   * `SiteRebuildRole` (reconstrucción del sitio al publicar); SIN él NO se crea (falla cerrado:
+   * el rol no puede invalidar sin saber qué distribución). Se valida igual que en `bin/app.ts`.
+   */
+  readonly siteDistributionId?: string;
 }
 
 // Se validan los datos de GitHub porque terminan dentro de la política de confianza: un
@@ -54,11 +61,14 @@ function assertGithubRepo(github: GithubRepo): void {
  */
 export class CiStack extends Stack {
   public readonly deployRole: Role;
+  /** Solo existe con `siteDistributionId`. */
+  public readonly siteRebuildRole: Role | undefined;
 
   public constructor(scope: Construct, id: string, props: CiStackProps) {
-    const { deploy, github, existingOidcProviderArn, ...stackProps } = props;
+    const { deploy, github, existingOidcProviderArn, siteDistributionId, ...stackProps } = props;
     super(scope, id, stackProps);
     assertGithubRepo(github);
+    const distributionId = parseSiteDistributionId(siteDistributionId);
 
     // Constructo L1 (CloudFormation nativo). El L2 `OpenIdConnectProvider` crea una Lambda
     // como custom resource que aquí no hace falta. La huella digital (thumbprint) ya no se necesita.
@@ -130,6 +140,58 @@ export class CiStack extends Stack {
         resources: [`arn:aws:cloudfront::${account}:distribution/*`],
       }),
     );
+
+    // Rol APARTE para el workflow que reconstruye el sitio al publicar (`site-build.yml`). Su
+    // environment de GitHub (`site-rebuild-<env>`) NO tiene revisores: lo dispara la Lambda de
+    // publicación sin que nadie apruebe. Por eso (a) su confianza está acotada con claves de IAM
+    // para GitHub (`repository_id` y `ref`; `event_name` NO es una clave de IAM) y (b) sus permisos
+    // son los mínimos de `sync-site.ts`, sin poder tocar la infraestructura. El rol de despliegue
+    // (con aprobación manual) no cambia.
+    if (distributionId !== undefined) {
+      const rebuildSub = `repo:${github.owner}@${github.ownerId}/${github.repo}@${github.repoId}:environment:site-rebuild-${deploy.name}`;
+      const rebuildRole = new Role(this, 'SiteRebuildRole', {
+        description: `GitHub Actions (${deploy.name}): reconstruye y publica el sitio de Canteras Naturales`,
+        assumedBy: new FederatedPrincipal(
+          providerArn,
+          {
+            StringEquals: {
+              [`${OIDC_HOST}:aud`]: 'sts.amazonaws.com',
+              [`${OIDC_HOST}:sub`]: rebuildSub,
+              [`${OIDC_HOST}:repository_id`]: github.repoId,
+              [`${OIDC_HOST}:ref`]: 'refs/heads/main',
+            },
+          },
+          'sts:AssumeRoleWithWebIdentity',
+        ),
+        maxSessionDuration: Duration.hours(1),
+      });
+      rebuildRole.addToPolicy(
+        new PolicyStatement({
+          actions: ['cloudformation:DescribeStacks'],
+          resources: [
+            `arn:aws:cloudformation:${region}:${account}:stack/canteras-site-${deploy.name}/*`,
+          ],
+        }),
+      );
+      rebuildRole.addToPolicy(
+        new PolicyStatement({ actions: ['s3:ListBucket'], resources: [bucketPattern] }),
+      );
+      rebuildRole.addToPolicy(
+        new PolicyStatement({
+          actions: ['s3:PutObject', 's3:DeleteObject'],
+          resources: [`${bucketPattern}/*`],
+        }),
+      );
+      rebuildRole.addToPolicy(
+        new PolicyStatement({
+          actions: ['cloudfront:CreateInvalidation'],
+          // Solo la distribución del sitio (a diferencia del rol de despliegue, sin `distribution/*`).
+          resources: [`arn:aws:cloudfront::${account}:distribution/${distributionId}`],
+        }),
+      );
+      this.siteRebuildRole = rebuildRole;
+      new CfnOutput(this, 'SiteRebuildRoleArn', { value: rebuildRole.roleArn });
+    }
 
     // Valor para la variable del repositorio AWS_ROLE_ARN (no va en el código: el repo es público).
     new CfnOutput(this, 'DeployRoleArn', { value: this.deployRole.roleArn });

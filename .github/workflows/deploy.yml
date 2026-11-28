@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       accion:
-        description: 'diff = solo mostrar cambios · deploy = desplegar y publicar el sitio'
+        description: 'diff = solo mostrar cambios · deploy = desplegar la infraestructura del sitio'
         type: choice
         options: [diff, deploy]
         default: diff
@@ -25,6 +25,10 @@ on:
         description: 'Solo para deploy: SHA completo que se vio en el diff (se imprime al inicio)'
         type: string
         default: ''
+      subir_placeholder:
+        description: 'Solo para el PRIMER despliegue: sube la página provisional. NUNCA en un sitio con contenido real'
+        type: boolean
+        default: false
 
 # Permisos mínimos a nivel de workflow; el job añade solo id-token para pedir el token OIDC.
 permissions:
@@ -106,6 +110,8 @@ jobs:
         working-directory: infra
         run: npx cdk deploy canteras-site-dev --require-approval never
 
-      - name: Publicar la página
-        if: inputs.accion == 'deploy'
+      # Sube `infra/placeholder` con `--delete`: BORRARÍA el sitio real. Solo para el primer
+      # despliegue; el sitio con contenido lo publica `site-build.yml` (al publicar el catálogo).
+      - name: Publicar la página provisional
+        if: inputs.accion == 'deploy' && inputs.subir_placeholder
         run: npx tsx scripts/sync-site.ts

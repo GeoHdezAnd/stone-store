@@ -4,10 +4,17 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   buildCatalogDocument,
+  CATALOG_MAX_BYTES,
+  CATALOG_MIN_VERSION_ATTEMPTS,
+  CATALOG_MIN_VERSION_WAIT_MS,
   catalogDocumentSchema,
+  catalogSizeExceeded,
+  decideCatalogVersion,
+  decideUrlFailure,
   finishSchema,
   projectSchema,
   publicSettingsSchema,
+  readCatalogBuildOptions,
   serviceSchema,
   stoneSchema,
   type CatalogDocument,
@@ -16,6 +23,9 @@ import {
 // Loader de build (CLAUDE.md 6.1). Orden de fuentes:
 //   1. `CATALOG_URL` (el `published/catalog.json` que publica el dashboard);
 //   2. si no existe o falla, el seed de `content/` (datos de ejemplo).
+// Variables opcionales del build que dispara la publicación (la lógica vive en `@canteras/shared`):
+//   - `CATALOG_REQUIRED=1`: si la URL falla, el build FALLA en vez de usar el seed;
+//   - `CATALOG_MIN_VERSION=vNNNN`: versión mínima del catálogo (reintenta si la copia está en caché).
 // Corre solo en el build (Node), nunca en el navegador.
 
 export type CatalogSource = 'url' | 'seed';
@@ -49,14 +59,55 @@ function normalize(doc: CatalogDocument): CatalogDocument {
   );
 }
 
-async function loadFromUrl(rawUrl: string): Promise<CatalogDocument> {
+/** Lee el cuerpo con tope de bytes: se corta al pasarse, sin descargar el resto. */
+async function readBodyLimited(res: Response): Promise<string> {
+  if (
+    res.headers.has('content-length') &&
+    catalogSizeExceeded(Number(res.headers.get('content-length')))
+  ) {
+    throw new Error('el catálogo excede el tamaño máximo');
+  }
+  if (res.body === null) throw new Error('respuesta sin cuerpo');
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+    total += chunk.byteLength;
+    if (catalogSizeExceeded(total, CATALOG_MAX_BYTES)) {
+      throw new Error('el catálogo excede el tamaño máximo');
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function fetchCatalogOnce(url: URL): Promise<CatalogDocument> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`respondió HTTP ${res.status}`);
+  return catalogDocumentSchema.parse(JSON.parse(await readBodyLimited(res)));
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function loadFromUrl(rawUrl: string, minVersion: string | null): Promise<CatalogDocument> {
   const url = new URL(rawUrl);
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new Error('CATALOG_URL debe ser http(s)');
   }
-  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`respondió HTTP ${res.status}`);
-  return catalogDocumentSchema.parse(await res.json());
+  for (let attempt = 1; ; attempt++) {
+    const doc = await fetchCatalogOnce(url);
+    const decision = decideCatalogVersion({
+      minVersion,
+      version: doc.version,
+      attempt,
+      maxAttempts: CATALOG_MIN_VERSION_ATTEMPTS,
+    });
+    if (decision.action === 'accept') return doc;
+    if (decision.action === 'fail') {
+      throw new Error(`el catálogo (${doc.version}) es más viejo que ${minVersion}`);
+    }
+    console.warn(`[catalog] Versión ${doc.version} < ${minVersion}; reintento ${attempt}.`);
+    await sleep(CATALOG_MIN_VERSION_WAIT_MS);
+  }
 }
 
 // Los archivos del seed traen un sobre `{ ejemplo, aviso, items }` (ver content/README.md).
@@ -92,14 +143,23 @@ async function loadFromSeed(): Promise<CatalogDocument> {
 }
 
 async function load(): Promise<LoadedCatalog> {
+  const options = readCatalogBuildOptions(process.env);
   const url = process.env['CATALOG_URL'];
+  if (options.required && !url) {
+    throw new Error('CATALOG_REQUIRED=1 exige definir CATALOG_URL.');
+  }
   if (url) {
     try {
-      const catalog = normalize(await loadFromUrl(url));
+      const catalog = normalize(await loadFromUrl(url, options.minVersion));
       console.info(`[catalog] Fuente: CATALOG_URL (versión ${catalog.version})`);
       return { catalog, source: 'url' };
     } catch (error) {
       const motivo = error instanceof Error ? error.message : String(error);
+      if (decideUrlFailure({ required: options.required }) === 'fail') {
+        throw new Error(`CATALOG_REQUIRED=1: no se pudo leer CATALOG_URL (${motivo}).`, {
+          cause: error,
+        });
+      }
       console.warn(`[catalog] CATALOG_URL falló (${motivo}); se usa el seed de content/.`);
     }
   }

@@ -29,6 +29,7 @@ interface BuildOptions {
   siteOrigins?: string[];
   adminBaseUrl?: string;
   turnstileSecretParam?: string;
+  siteRebuild?: { tokenParam: string; repository: string; workflowFile: string; ref?: string };
 }
 
 function build(opts: BuildOptions = {}): {
@@ -48,6 +49,7 @@ function build(opts: BuildOptions = {}): {
     siteOrigins,
     adminBaseUrl,
     turnstileSecretParam,
+    siteRebuild,
   } = opts;
   // Se omite el bundling con esbuild para que la síntesis sea rápida; el synth real de
   // `cdk synth` sí empaqueta.
@@ -86,6 +88,7 @@ function build(opts: BuildOptions = {}): {
     ...(siteOrigins ? { siteOrigins } : {}),
     ...(adminBaseUrl ? { adminBaseUrl } : {}),
     ...(turnstileSecretParam ? { turnstileSecretParam } : {}),
+    ...(siteRebuild ? { siteRebuild } : {}),
     ...(siteDistributionId ? { siteDistributionId } : {}),
     ...(sesIdentityArn ? { sesIdentityArn } : {}),
     ...(sesRecipientIdentityArns ? { sesRecipientIdentityArns } : {}),
@@ -2246,14 +2249,20 @@ describe('ApiStack: Lambda QuotesCreate (ruta pública)', () => {
     });
 
     it('ningún secreto en variables de entorno de ninguna Lambda', () => {
-      for (const o of [{}, { turnstileSecretParam: PARAM }, { emulated: true }]) {
+      for (const o of [
+        {},
+        { turnstileSecretParam: PARAM },
+        { emulated: true },
+        { siteRebuild: REBUILD, siteDistributionId: 'E1ABCDEF' },
+      ]) {
         const { stack } = build({ sesIdentityArn: IDENTIDAD, ...o });
         const t = Template.fromStack(stack);
         for (const [id, fn] of Object.entries(t.findResources('AWS::Lambda::Function'))) {
           const vars = (fn.Properties.Environment?.Variables ?? {}) as Record<string, unknown>;
           for (const [k, v] of Object.entries(vars)) {
+            // Son el NOMBRE de un parámetro SSM, no su valor.
+            if (k === 'TURNSTILE_SECRET_PARAM' || k === 'SITE_REBUILD_TOKEN_PARAM') continue;
             expect(k, `${id} ${k}`).not.toMatch(/PASSWORD|TOKEN|API_?KEY|PRIVATE|CREDENTIAL/i);
-            if (k === 'TURNSTILE_SECRET_PARAM') continue; // es el NOMBRE del parámetro, no su valor
             expect(k, `${id} ${k}`).not.toMatch(/SECRET/i);
             expect(JSON.stringify(v), `${id} ${k}`).not.toMatch(/0x4AAAA|sk_live|AKIA[A-Z0-9]{12}/);
           }
@@ -2643,5 +2652,160 @@ describe('ApiStack: Lambda AdminMetrics (resumen del dashboard, solo lectura)', 
       expect(vars, f).not.toContain('POSTAL_CODES_TABLE');
       expect(vars, f).not.toContain('QUOTES_BY_STATUS_INDEX');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// AdminPublish: reconstrucción del sitio vía GitHub Actions (token en SSM, solo AWS real).
+// ---------------------------------------------------------------------------------------------
+
+const REBUILD = {
+  tokenParam: '/canteras/dev/github-dispatch-token',
+  repository: 'mi-dueno/mi-repo',
+  workflowFile: 'site-build.yml',
+} as const;
+const DIST_ID = 'E1ABCDEF';
+const PROD_ORIGINS = ['https://admin.ejemplo.mx'];
+
+describe('ApiStack: AdminPublish reconstruye el sitio', () => {
+  const varsPublish = (t: Template) =>
+    t.findResources('AWS::Lambda::Function')[idFuncion(t, 'AdminPublish')]!.Properties.Environment
+      .Variables as Record<string, unknown>;
+  const ssmDe = (t: Template, fn: string) =>
+    sentenciasDe(t, fn).filter((st) =>
+      lista(st['Action']).some((a) => String(a).startsWith('ssm:') || String(a).startsWith('kms:')),
+    );
+
+  it('sin la prop: ninguna variable SITE_REBUILD_* y ningún permiso de SSM', () => {
+    const t = synth();
+    expect(Object.keys(varsPublish(t)).filter((k) => k.startsWith('SITE_REBUILD_'))).toEqual([]);
+    expect(ssmDe(t, 'AdminPublish')).toEqual([]);
+  });
+
+  it('en AWS real: 4 variables (nombre del parámetro, repo, workflow, rama por defecto main)', () => {
+    const v = varsPublish(synth({ siteRebuild: REBUILD, siteDistributionId: DIST_ID }));
+    expect(v['SITE_REBUILD_TOKEN_PARAM']).toBe(REBUILD.tokenParam);
+    expect(v['SITE_REBUILD_REPOSITORY']).toBe(REBUILD.repository);
+    expect(v['SITE_REBUILD_WORKFLOW']).toBe(REBUILD.workflowFile);
+    expect(v['SITE_REBUILD_REF']).toBe('main');
+    expect(Object.keys(v).filter((k) => k.startsWith('SITE_REBUILD_'))).toHaveLength(4);
+  });
+
+  it('la rama puede indicarse', () => {
+    const v = varsPublish(
+      synth({ siteRebuild: { ...REBUILD, ref: 'release/dev' }, siteDistributionId: DIST_ID }),
+    );
+    expect(v['SITE_REBUILD_REF']).toBe('release/dev');
+  });
+
+  it('IAM: UNA sentencia ssm:GetParameter sobre el ARN EXACTO del parámetro; sin comodines ni KMS', () => {
+    const t = synth({ siteRebuild: REBUILD, siteDistributionId: DIST_ID });
+    const ss = ssmDe(t, 'AdminPublish');
+    expect(ss).toHaveLength(1);
+    expect(lista(ss[0]!['Action'])).toEqual(['ssm:GetParameter']);
+    expect(ss[0]!['Condition']).toBeUndefined();
+    expect(lista(ss[0]!['Resource'])).toHaveLength(1);
+    const recurso = JSON.stringify(ss[0]!['Resource']);
+    expect(recurso).toContain(':ssm:');
+    expect(recurso).toMatch(/AWS::Region|us-east-1/);
+    expect(recurso).toMatch(/AWS::AccountId|\d{12}/);
+    expect(recurso).toContain(`:parameter${REBUILD.tokenParam}`);
+    expect(recurso).not.toContain('*');
+    expect(JSON.stringify(sentenciasDe(t, 'AdminPublish'))).not.toContain('kms:');
+  });
+
+  describe('falla cerrado (M1 y B9)', () => {
+    it('prod con la reconstrucción configurada LANZA: el workflow y el environment solo existen para dev', () => {
+      expect(() =>
+        build({
+          name: 'prod',
+          allowedOrigins: PROD_ORIGINS,
+          siteRebuild: REBUILD,
+          siteDistributionId: DIST_ID,
+        }),
+      ).toThrow(/solo está definida para dev/);
+    });
+
+    it('prod también lanza con emulador (no se mezcla el entorno)', () => {
+      expect(() =>
+        build({ name: 'prod', emulated: true, allowedOrigins: PROD_ORIGINS, siteRebuild: REBUILD }),
+      ).toThrow(/solo está definida para dev/);
+    });
+
+    it('prod SIN la reconstrucción sintetiza como siempre: sin variables ni SSM de reconstrucción', () => {
+      const t = synth({ name: 'prod', allowedOrigins: PROD_ORIGINS, siteDistributionId: DIST_ID });
+      expect(Object.keys(varsPublish(t)).filter((k) => k.startsWith('SITE_REBUILD_'))).toEqual([]);
+      expect(ssmDe(t, 'AdminPublish')).toEqual([]);
+    });
+
+    it('dev con la reconstrucción y la distribución funciona', () => {
+      expect(() => build({ siteRebuild: REBUILD, siteDistributionId: DIST_ID })).not.toThrow();
+    });
+
+    it.each([undefined, ''])(
+      'fuera del emulador, token sin SITE_DISTRIBUTION_ID (%j) LANZA: el rol de reconstrucción no existiría',
+      (siteDistributionId) => {
+        expect(() =>
+          build({
+            siteRebuild: REBUILD,
+            ...(siteDistributionId === undefined ? {} : { siteDistributionId }),
+          }),
+        ).toThrow(/SITE_DISTRIBUTION_ID/);
+      },
+    );
+  });
+
+  it('con emulador: 0 variables SITE_REBUILD_* y 0 sentencias SSM aunque se pase la prop', () => {
+    const t = synth({ emulated: true, siteRebuild: REBUILD });
+    expect(Object.keys(varsPublish(t)).filter((k) => k.startsWith('SITE_REBUILD_'))).toEqual([]);
+    expect(JSON.stringify(sentenciasDe(t, 'AdminPublish'))).not.toContain('ssm:');
+  });
+
+  it('ninguna otra Lambda recibe permiso sobre ese parámetro ni sus variables', () => {
+    const { stack } = build({
+      siteRebuild: REBUILD,
+      siteDistributionId: DIST_ID,
+      turnstileSecretParam: '/canteras/dev/turnstile',
+    });
+    const t = Template.fromStack(stack);
+    for (const id of Object.keys(t.findResources('AWS::Lambda::Function'))) {
+      if (id.includes('AdminPublish')) continue;
+      const fn = id.replace(/Function.*$/, '');
+      const nombre = [
+        'Health',
+        'AdminMe',
+        'AdminCatalog',
+        'AdminMedia',
+        'AdminSettings',
+        'AdminFreight',
+        'AdminQuotes',
+        'QuotesCreate',
+        'AdminMetrics',
+        'AdminUsers',
+      ].find((n) => id.includes(n));
+      if (nombre === undefined) continue;
+      expect(JSON.stringify(sentenciasDe(t, nombre)), fn).not.toContain('github-dispatch-token');
+      const v =
+        t.findResources('AWS::Lambda::Function')[id]!.Properties.Environment?.Variables ?? {};
+      expect(
+        Object.keys(v).filter((k) => k.startsWith('SITE_REBUILD_')),
+        fn,
+      ).toEqual([]);
+    }
+  });
+
+  it.each([
+    ['tokenParam con comodín', { tokenParam: '/canteras/*' }],
+    ['tokenParam sin barra', { tokenParam: 'sin-barra' }],
+    ['tokenParam vacío', { tokenParam: '' }],
+    ['repository sin dueño', { repository: 'solo-repo' }],
+    ['repository con ruta', { repository: 'a/b/c' }],
+    ['workflow con ruta', { workflowFile: '../x.yml' }],
+    ['workflow sin extensión yml', { workflowFile: 'site-build.sh' }],
+    ['rama inválida', { ref: 'main; rm' }],
+  ])('rechaza al sintetizar: %s', (_n, over) => {
+    expect(() =>
+      build({ siteRebuild: { ...REBUILD, ...over }, siteDistributionId: DIST_ID }),
+    ).toThrow(/reconstrucci|SITE_REBUILD/i);
   });
 });
