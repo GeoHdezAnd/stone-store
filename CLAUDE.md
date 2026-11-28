@@ -271,7 +271,7 @@ Tests unitarios con casos: 1 m², 210 m² (varios viajes), tonelada, mezcla de p
 | `POST /admin/freight/simulate` | Simulador de flete. |
 | `GET /admin/settings` · `PUT /admin/settings/public` · `PUT /admin/settings/mail` · `PUT /admin/settings/quoting` | Configuración (patio, plantillas de correo, IVA por defecto). El `GET` devuelve las tres filas; solo `owner` escribe. |
 | `POST /admin/publish` · `GET /admin/publications` · `POST /admin/publications/{version}/revert` | Publicar y revertir `catalog.json` (solo `owner`). La respuesta incluye `invalidation` (`ok`/`skipped`/`failed`) y `rebuild` (`requested`/`failed`/`not_configured`: reconstrucción del sitio por GitHub Actions, best-effort). |
-| `POST /admin/users/invite` | Invitar usuario `staff` (Cognito AdminCreateUser). **Pendiente, no implementada:** hoy los usuarios de desarrollo se crean con `scripts/dev-users.ts`. |
+| `POST /admin/users/invite` | Invitar usuario `staff` (Cognito AdminCreateUser). **Pendiente, no implementada:** hoy los usuarios de desarrollo se crean con `scripts/dev-users.ts` (solo Floci) y los reales con `scripts/create-user.ts` (solo AWS real, con guardas; ver `docs/plan-aws-real.md`). |
 
 Requisitos transversales: CORS solo al dominio del sitio; límites de tamaño de body; throttling por IP/etapa; respuestas de error sin filtrar detalles internos; logs estructurados JSON con `requestId` (sin datos personales completos).
 
@@ -307,7 +307,7 @@ canteras-naturales/
 │              DataStack (DynamoDB), MediaStack (S3 de fotos + Lambda de variantes), PublishStack (S3 de `catalog.json`), AuthStack (Cognito),
 │              AdminSiteStack (S3+CloudFront del dashboard), ObservabilityStack (alarmas, SNS, budgets), CiStack (rol OIDC de CI)
 │              (el correo usa SES desde las Lambdas; no hay un `MailStack` aparte)
-├─ scripts/                   # seed, seed-freight, seed-postal-codes, seed-quotes, dev-users, dev-token, admin-config, sync-site, media-backfill
+├─ scripts/                   # seed, seed-freight, seed-postal-codes, seed-quotes, dev-users (Floci), create-user (AWS real), dev-token, admin-config, sync-site, media-backfill
 ├─ docs/                      # levantar-y-probar.md (guía de pruebas) y siguiente-sesion.md (relevo entre sesiones); no se rastrean en git
 ├─ .claude/                   # agente de relevo (session-handoff) y skill stone-images
 └─ .github/workflows/         # ci.yml (sin AWS), deploy.yml (infraestructura; dormido hasta el hito de AWS real) y site-build.yml (reconstruye el sitio al publicar)
