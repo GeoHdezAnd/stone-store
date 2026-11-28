@@ -12,11 +12,19 @@ export interface AdminSiteStackProps extends StackProps {
    * no depende de la API (ver «Circularidad CORS» abajo).
    */
   readonly apiOrigin?: string;
+  /** Ver `AdminCspOptions.mediaOrigin`. Sin cablear en `app.ts` mientras no haya miniaturas. */
+  readonly mediaOrigin?: string;
 }
 
 export interface AdminCspOptions {
   readonly region: string;
   readonly apiOrigin?: string;
+  /**
+   * Origen de la distribución del SITIO (`https://<id>.cloudfront.net`), que sirve las fotos en
+   * `/media/*`. Opcional: solo hace falta cuando el dashboard muestre miniaturas (hoy no muestra
+   * ninguna imagen). Sin comodines: debe ser UNA distribución concreta.
+   */
+  readonly mediaOrigin?: string;
 }
 
 /**
@@ -27,8 +35,9 @@ export interface AdminCspOptions {
  *   línea (verificado con el build); sin `unsafe-inline`.
  * - `connect-src`: la API, Cognito (`cognito-idp`, SRP/refresh desde el navegador) y el bucket
  *   de media (subida con URL prefirmada por PUT).
- * - `img-src 'self' data:` + el bucket de media: NO se abre todo `https:` (evita exfiltrar
- *   datos con imágenes remotas); las fotos del catálogo vienen del bucket de media.
+ * - `img-src 'self' data:`: NO se abre todo `https:` (evita exfiltrar datos con imágenes remotas)
+ *   ni el bucket de S3 (privado: ahí solo se SUBE; el dashboard hoy no muestra fotos). Si más
+ *   adelante muestra miniaturas, se pasa `mediaOrigin` (la distribución del sitio, `/media/*`).
  */
 export function buildAdminCsp(options: AdminCspOptions): string {
   const { region } = options;
@@ -39,13 +48,24 @@ export function buildAdminCsp(options: AdminCspOptions): string {
       `apiOrigin inválido: "${apiOrigin}". Debe ser https://host (sin ruta ni caracteres especiales).`,
     );
   }
+  // La distribución es UNA concreta (`https://<id>.cloudfront.net`): sin comodín ni ruta.
+  const mediaOrigin = options.mediaOrigin;
+  if (
+    mediaOrigin !== undefined &&
+    !/^https:\/\/[a-z0-9]{8,20}\.cloudfront\.net$/.test(mediaOrigin)
+  ) {
+    throw new Error(
+      `mediaOrigin inválido: "${mediaOrigin}". Debe ser https://<id>.cloudfront.net (sin comodines ni ruta).`,
+    );
+  }
   const media = `https://*.s3.${region}.amazonaws.com`;
+  const imgSrc = ["'self'", 'data:', ...(mediaOrigin === undefined ? [] : [mediaOrigin])];
   return [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
     "font-src 'self'",
-    `img-src 'self' data: ${media}`,
+    `img-src ${imgSrc.join(' ')}`,
     `connect-src 'self' ${apiOrigin} https://cognito-idp.${region}.amazonaws.com ${media}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
@@ -68,7 +88,7 @@ export class AdminSiteStack extends Stack {
   public readonly site: StaticSite;
 
   public constructor(scope: Construct, id: string, props: AdminSiteStackProps) {
-    const { deploy, apiOrigin, ...stackProps } = props;
+    const { deploy, apiOrigin, mediaOrigin, ...stackProps } = props;
     super(scope, id, stackProps);
 
     this.site = new StaticSite(this, 'Site', {
@@ -79,6 +99,7 @@ export class AdminSiteStack extends Stack {
         contentSecurityPolicy: buildAdminCsp({
           region: deploy.region,
           ...(apiOrigin === undefined ? {} : { apiOrigin }),
+          ...(mediaOrigin === undefined ? {} : { mediaOrigin }),
         }),
         noIndex: true,
         // Floci no soporta ResponseHeadersPolicy propias: usa la administrada.

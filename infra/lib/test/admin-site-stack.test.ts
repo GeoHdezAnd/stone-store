@@ -54,11 +54,51 @@ describe('buildAdminCsp', () => {
     expect(value).not.toContain('execute-api');
   });
 
-  it('img-src no abre todo https: solo el bucket de media', () => {
+  it('img-src no abre todo https ni el bucket de S3 (el dashboard no muestra fotos aún)', () => {
     const value = buildAdminCsp({ region: 'us-east-1' });
     const img = value.split('; ').find((d) => d.startsWith('img-src')) ?? '';
-    expect(img).not.toMatch(/(^|\s)https:(\s|$)/);
-    expect(img).toContain('https://*.s3.us-east-1.amazonaws.com');
+    expect(img).toBe("img-src 'self' data:");
+  });
+
+  it('mediaOrigin acepta ids de 8 y de 20 caracteres (límites del formato)', () => {
+    for (const id of ['d2222222', 'd2222222222222222222']) {
+      expect(() =>
+        buildAdminCsp({ region: 'us-east-1', mediaOrigin: `https://${id}.cloudfront.net` }),
+      ).not.toThrow();
+    }
+  });
+
+  it('con mediaOrigin agrega SOLO esa distribución a img-src (no a connect-src)', () => {
+    const value = buildAdminCsp({
+      region: 'us-east-1',
+      mediaOrigin: 'https://d222222abcdef8.cloudfront.net',
+    });
+    const dirs = value.split('; ');
+    expect(dirs.find((d) => d.startsWith('img-src'))).toBe(
+      "img-src 'self' data: https://d222222abcdef8.cloudfront.net",
+    );
+    expect(dirs.find((d) => d.startsWith('connect-src'))).not.toContain('cloudfront.net');
+  });
+
+  it.each([
+    'http://d222222abcdef8.cloudfront.net',
+    'https://*.cloudfront.net',
+    'https://d222222abcdef8.cloudfront.net/media',
+    'https://d222222abcdef8.cloudfront.net; script-src *',
+    'https://evil.example.com',
+    'https://d222222abcdef8.cloudfront.net:8443',
+    'https://d222222abcdef8.cloudfront.net/',
+    'https://D222222ABCDEF8.cloudfront.net',
+    'https://d222222abcdef8.CLOUDFRONT.net',
+    ' https://d222222abcdef8.cloudfront.net',
+    'https://d222222abcdef8.cloudfront.net ',
+    'https://d222222.cloudfront.net',
+    'https://d2222222222222222222a.cloudfront.net',
+    'https://a.d222222abcdef8.cloudfront.net',
+    'https://d222222abcdef8.cloudfront.net.evil.com',
+    '',
+  ])('rechaza el mediaOrigin inválido "%s"', (mediaOrigin) => {
+    expect(() => buildAdminCsp({ region: 'us-east-1', mediaOrigin })).toThrow(/mediaOrigin/);
   });
 
   it('rechaza orígenes de API que no sean https', () => {

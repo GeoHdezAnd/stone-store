@@ -21,6 +21,7 @@ interface Opts {
   /** Por defecto `true` en pruebas (sin red); los tests de la comprobación lo ponen en `false`. */
   skipSharpCheck?: boolean;
   reservedConcurrency?: number;
+  siteDistributionId?: string;
 }
 
 function build(opts: Opts = {}): { template: Template; stack: MediaStack } {
@@ -31,6 +32,7 @@ function build(opts: Opts = {}): { template: Template; stack: MediaStack } {
     packSharp,
     skipSharpCheck = true,
     reservedConcurrency,
+    siteDistributionId,
   } = opts;
   // `bundling-stacks: []` evita ejecutar esbuild (y cualquier red) al sintetizar en las pruebas.
   const app = new App({ context: { 'aws:cdk:bundling-stacks': [] } });
@@ -40,6 +42,7 @@ function build(opts: Opts = {}): { template: Template; stack: MediaStack } {
     ...(packSharp === undefined ? {} : { packSharp }),
     skipSharpCheck,
     ...(reservedConcurrency === undefined ? {} : { reservedConcurrency }),
+    ...(siteDistributionId === undefined ? {} : { siteDistributionId }),
   });
   Tags.of(app).add('Project', 'canteras-naturales');
   Tags.of(app).add('Env', name);
@@ -418,5 +421,106 @@ describe('MediaStack: concurrencia reservada OPCIONAL', () => {
   it('la pila rechaza un valor inválido aunque no pase por parseReservedConcurrency', () => {
     expect(() => synth({ reservedConcurrency: 0 })).toThrow(/entero/);
     expect(() => synth({ reservedConcurrency: 1.5 })).toThrow(/entero/);
+  });
+});
+
+describe('MediaStack: lectura por la distribución del sitio (OAC)', () => {
+  const ID = 'E1ABCDEF234567';
+  const statements = (t: Template): Json[] =>
+    Object.values(t.findResources('AWS::S3::BucketPolicy')).flatMap(
+      (p) => p.Properties.PolicyDocument.Statement as Json[],
+    );
+  const cdn = (t: Template): Json[] =>
+    statements(t).filter((s) =>
+      JSON.stringify(s['Principal']).includes('cloudfront.amazonaws.com'),
+    );
+
+  it('el bucket tiene nombre fijo por entorno, cuenta y región', () => {
+    const name = JSON.stringify(bucket(synth()).Properties.BucketName);
+    expect(name).toMatch(/canteras-media-dev.*AWS::AccountId.*AWS::Region/);
+    expect(JSON.stringify(bucket(synth({ name: 'prod' })).Properties.BucketName)).toContain(
+      'canteras-media-prod',
+    );
+  });
+
+  it('con id: un solo statement para CloudFront, s3:GetObject y SourceArn EXACTO', () => {
+    const [st, ...rest] = cdn(synth({ siteDistributionId: ID }));
+    expect(rest).toEqual([]);
+    expect(st!['Effect']).toBe('Allow');
+    expect(st!['Principal']).toEqual({ Service: 'cloudfront.amazonaws.com' });
+    expect(st!['Action']).toBe('s3:GetObject');
+    expect(Object.keys(st!['Condition'])).toEqual(['StringEquals']);
+    expect(JSON.stringify(st!['Condition'])).toMatch(
+      /"AWS:SourceArn":.*arn:.*:cloudfront::.*AWS::AccountId.*:distribution\/E1ABCDEF234567/,
+    );
+  });
+
+  it('con id: los recursos son EXACTAMENTE las 9 variantes (3 entidades x 3 anchos), nunca /*', () => {
+    const [st] = cdn(synth({ siteDistributionId: ID }));
+    const resources = (st!['Resource'] as Json[]).map((r) => {
+      const parts = (r['Fn::Join'] as [string, unknown[]])[1];
+      return parts[parts.length - 1] as string;
+    });
+    const expected = ['stones', 'projects', 'finishes'].flatMap((e) =>
+      [480, 960, 1600].map((w) => `/${e}/*-${w}w.webp`),
+    );
+    expect(resources.sort()).toEqual(expected.sort());
+    for (const r of resources) expect(r).not.toBe('/*');
+  });
+
+  it('nunca concede s3:ListBucket ni acciones comodín a CloudFront', () => {
+    for (const st of cdn(synth({ siteDistributionId: ID }))) {
+      expect(JSON.stringify(st['Action'])).not.toContain('*');
+      expect(JSON.stringify(st['Action'])).not.toContain('List');
+      expect(st['Action']).toBe('s3:GetObject');
+    }
+  });
+
+  it('sin id: ningún statement de CloudFront (falla cerrado) y avisa que habrá 403', () => {
+    const { template, stack } = build();
+    expect(cdn(template)).toEqual([]);
+    Annotations.fromStack(stack).hasWarning(
+      '*',
+      Match.stringLikeRegexp('SITE_DISTRIBUTION_ID.*403'),
+    );
+  });
+
+  it('con id no avisa', () => {
+    const { stack } = build({ siteDistributionId: ID });
+    Annotations.fromStack(stack).hasNoWarning('*', Match.stringLikeRegexp('SITE_DISTRIBUTION_ID'));
+  });
+
+  it('con emulador y sin id: ni statement ni aviso (Floci no aplica policies)', () => {
+    const { template, stack } = build({ emulated: true });
+    expect(cdn(template)).toEqual([]);
+    Annotations.fromStack(stack).hasNoWarning('*', Match.stringLikeRegexp('SITE_DISTRIBUTION_ID'));
+  });
+
+  it.each(['', '  '])('un id vacío ("%s") no crea statement', (raw) => {
+    expect(cdn(synth({ siteDistributionId: raw }))).toEqual([]);
+  });
+
+  it.each(['abc', 'e1abcdef234567', 'E1*', 'E1ABCDEF234567/../x'])(
+    'el id inválido "%s" lanza',
+    (raw) => {
+      expect(() => synth({ siteDistributionId: raw })).toThrow(/SITE_DISTRIBUTION_ID/);
+    },
+  );
+
+  it('conserva BLOCK_ALL, SSL y SSE con el permiso de CloudFront', () => {
+    const t = synth({ siteDistributionId: ID });
+    t.hasResourceProperties('AWS::S3::Bucket', {
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
+      },
+    });
+    expect(
+      statements(t).some(
+        (s) => s['Effect'] === 'Deny' && s['Condition']?.Bool?.['aws:SecureTransport'] === 'false',
+      ),
+    ).toBe(true);
   });
 });

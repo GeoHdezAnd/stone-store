@@ -1,5 +1,6 @@
 import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 import {
+  type BehaviorOptions,
   Distribution,
   HeadersFrameOption,
   HeadersReferrerPolicy,
@@ -34,6 +35,8 @@ export interface StaticSiteProps {
    * opcionalmente, `X-Robots-Tag`). Sin esta opción se usa la administrada SECURITY_HEADERS.
    */
   readonly responseHeaders?: StaticSiteResponseHeaders;
+  /** Comportamientos extra por ruta (p. ej. `/media/*`). Cada uno trae su propio origen y OAC. */
+  readonly additionalBehaviors?: Record<string, BehaviorOptions>;
 }
 
 export interface StaticSiteResponseHeaders {
@@ -114,6 +117,7 @@ export class StaticSite extends Construct {
         // Política propia (CSP, noindex) si se pidió; si no, la administrada de AWS.
         responseHeadersPolicy: headersPolicy,
       },
+      ...(props.additionalBehaviors ? { additionalBehaviors: props.additionalBehaviors } : {}),
       ...(props.spaFallback === true
         ? {
             errorResponses: [403, 404].map((httpStatus) => ({

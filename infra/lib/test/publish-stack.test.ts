@@ -1,5 +1,5 @@
 import { App, Tags } from 'aws-cdk-lib';
-import { Match, Template } from 'aws-cdk-lib/assertions';
+import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
 
 import { PublishStack } from '../publish-stack.js';
@@ -7,17 +7,23 @@ import { PublishStack } from '../publish-stack.js';
 interface Opts {
   name?: 'dev' | 'prod';
   emulated?: boolean;
+  siteDistributionId?: string;
 }
 
-function synth(opts: Opts = {}): Template {
-  const { name = 'dev', emulated = false } = opts;
+function build(opts: Opts = {}): { template: Template; stack: PublishStack } {
+  const { name = 'dev', emulated = false, siteDistributionId } = opts;
   const app = new App();
   const stack = new PublishStack(app, 'Publish', {
     deploy: { name, account: undefined, region: 'us-east-1', emulated },
+    ...(siteDistributionId === undefined ? {} : { siteDistributionId }),
   });
   Tags.of(app).add('Project', 'canteras-naturales');
   Tags.of(app).add('Env', name);
-  return Template.fromStack(stack);
+  return { template: Template.fromStack(stack), stack };
+}
+
+function synth(opts: Opts = {}): Template {
+  return build(opts).template;
 }
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -131,5 +137,57 @@ describe('PublishStack: borrado por entorno', () => {
 describe('PublishStack: salidas', () => {
   it('expone PublishBucketName', () => {
     synth().hasOutput('PublishBucketName', { Value: Match.anyValue() });
+  });
+});
+
+describe('PublishStack: lectura por la distribución del sitio (OAC)', () => {
+  const ID = 'E1ABCDEF234567';
+  const statements = (t: Template): Json[] =>
+    Object.values(t.findResources('AWS::S3::BucketPolicy')).flatMap(
+      (p) => p.Properties.PolicyDocument.Statement as Json[],
+    );
+  const cdn = (t: Template): Json[] =>
+    statements(t).filter((s) =>
+      JSON.stringify(s['Principal']).includes('cloudfront.amazonaws.com'),
+    );
+
+  it('el bucket tiene nombre fijo por entorno, cuenta y región', () => {
+    expect(JSON.stringify(bucket(synth()).Properties.BucketName)).toMatch(
+      /canteras-publish-dev.*AWS::AccountId.*AWS::Region/,
+    );
+  });
+
+  it('con id: un solo statement, s3:GetObject, SourceArn exacto y SOLO published/catalog.json', () => {
+    const [st, ...rest] = cdn(synth({ siteDistributionId: ID }));
+    expect(rest).toEqual([]);
+    expect(st!['Effect']).toBe('Allow');
+    expect(st!['Principal']).toEqual({ Service: 'cloudfront.amazonaws.com' });
+    expect(st!['Action']).toBe('s3:GetObject');
+    expect(Object.keys(st!['Condition'])).toEqual(['StringEquals']);
+    expect(JSON.stringify(st!['Condition'])).toMatch(/:distribution\/E1ABCDEF234567/);
+    const res = st!['Resource'] as Json;
+    const parts = (res['Fn::Join'] as [string, unknown[]])[1];
+    expect(parts[parts.length - 1]).toBe('/published/catalog.json');
+    expect(JSON.stringify(res)).not.toContain('/v');
+  });
+
+  it('sin id: ningún statement de CloudFront y avisa que habrá 403', () => {
+    const { template, stack } = build();
+    expect(cdn(template)).toEqual([]);
+    Annotations.fromStack(stack).hasWarning(
+      '*',
+      Match.stringLikeRegexp('SITE_DISTRIBUTION_ID.*403'),
+    );
+  });
+
+  it('con emulador y sin id: sin statement ni aviso', () => {
+    const { template, stack } = build({ emulated: true });
+    expect(cdn(template)).toEqual([]);
+    Annotations.fromStack(stack).hasNoWarning('*', Match.stringLikeRegexp('SITE_DISTRIBUTION_ID'));
+  });
+
+  it('un id vacío no crea statement y uno inválido lanza', () => {
+    expect(cdn(synth({ siteDistributionId: '' }))).toEqual([]);
+    expect(() => synth({ siteDistributionId: 'xyz' })).toThrow(/SITE_DISTRIBUTION_ID/);
   });
 });

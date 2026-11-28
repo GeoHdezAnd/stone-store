@@ -25,6 +25,8 @@ import {
 } from 'aws-cdk-lib/aws-s3';
 import { type Construct } from 'constructs';
 
+import { mediaBucketName } from './bucket-names.js';
+import { grantCdnRead } from './cdn-grant.js';
 import { type DeployEnv } from './config.js';
 import { validateAllowedOrigins } from './origins.js';
 
@@ -128,6 +130,12 @@ export interface MediaStackProps extends StackProps {
   readonly reservedConcurrency?: number;
   /** Orígenes del dashboard que pueden subir fotos con PUT (mismos que el CORS de la API). */
   readonly allowedOrigins: string[];
+  /**
+   * Id de la distribución de CloudFront del sitio (`SITE_DISTRIBUTION_ID`). Con él, esa distribución
+   * (y solo ella) puede leer las VARIANTES WebP (`<entidad>/*-<ancho>w.webp`); los originales no.
+   * Sin él no hay permiso (falla cerrado).
+   */
+  readonly siteDistributionId?: string;
 }
 
 /**
@@ -147,6 +155,7 @@ export class MediaStack extends Stack {
       packSharp = false,
       skipSharpCheck = false,
       reservedConcurrency,
+      siteDistributionId,
       ...stackProps
     } = props;
     if (reservedConcurrency !== undefined) parseReservedConcurrency(reservedConcurrency);
@@ -166,6 +175,8 @@ export class MediaStack extends Stack {
     const ephemeral = deploy.name === 'dev';
 
     this.bucket = new Bucket(this, 'Bucket', {
+      // Nombre fijo: SiteStack lo importa sin depender de este stack (ver `bucket-names.ts`).
+      bucketName: mediaBucketName(deploy.name),
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       encryption: BucketEncryption.S3_MANAGED,
       // ACL deshabilitadas: solo valen las políticas IAM/bucket (el dueño del bucket es dueño de todo).
@@ -200,6 +211,19 @@ export class MediaStack extends Stack {
       reservedConcurrency,
     );
 
+    // Solo las variantes WebP son legibles desde CloudFront (nunca `/*`): el original con EXIF y
+    // sin recomprimir da 403 aunque fallara la CloudFront Function del sitio. Las entidades y los
+    // anchos salen de shared, igual que la política de escritura de la API.
+    grantCdnRead({
+      stack: this,
+      bucket: this.bucket,
+      distributionId: siteDistributionId,
+      objectPatterns: MEDIA_ENTITIES.flatMap((entity) =>
+        MEDIA_VARIANT_WIDTHS.map((width) => `${entity}/*-${width}w.webp`),
+      ),
+      emulated: deploy.emulated,
+      what: 'las fotos',
+    });
     new CfnOutput(this, 'MediaBucketName', { value: this.bucket.bucketName });
   }
 

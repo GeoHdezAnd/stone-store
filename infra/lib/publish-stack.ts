@@ -8,18 +8,26 @@ import {
 } from 'aws-cdk-lib/aws-s3';
 import { type Construct } from 'constructs';
 
+import { publishBucketName } from './bucket-names.js';
+import { grantCdnRead } from './cdn-grant.js';
 import { type DeployEnv } from './config.js';
 
 export interface PublishStackProps extends StackProps {
   readonly deploy: DeployEnv;
+  /**
+   * Id de la distribución de CloudFront del sitio (`SITE_DISTRIBUTION_ID`). Con él, esa distribución
+   * (y solo ella) puede leer `published/catalog.json`. Sin él no hay permiso (falla cerrado).
+   */
+  readonly siteDistributionId?: string;
 }
 
 /**
  * Bucket S3 del catálogo publicado (`catalog.json`): PRIVADO y con VERSIONADO.
  *
  * - Objetos inmutables `published/v<N>/catalog.json` (el historial para revertir) y la copia
- *   vigente `published/catalog.json`, que es la que lee el sitio público (más adelante, por
- *   CloudFront con OAC como segundo origen; el bucket NUNCA es público).
+ *   vigente `published/catalog.json`, que es la que lee el sitio público (por
+ *   CloudFront con OAC como origen `/published/*` de la distribución del sitio; el bucket NUNCA es
+ *   público).
  * - Es un bucket PROPIO, no el del sitio: el deploy del sitio usa `aws s3 sync --delete` y
  *   borraría estos objetos (CLAUDE.md 9.1: el contenido y la infra tienen ciclos de vida
  *   distintos).
@@ -30,12 +38,14 @@ export class PublishStack extends Stack {
   public readonly bucket: Bucket;
 
   public constructor(scope: Construct, id: string, props: PublishStackProps) {
-    const { deploy, ...stackProps } = props;
+    const { deploy, siteDistributionId, ...stackProps } = props;
     super(scope, id, stackProps);
 
     const ephemeral = deploy.name === 'dev';
 
     this.bucket = new Bucket(this, 'Bucket', {
+      // Nombre fijo: SiteStack lo importa sin depender de este stack (ver `bucket-names.ts`).
+      bucketName: publishBucketName(deploy.name),
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       encryption: BucketEncryption.S3_MANAGED,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
@@ -53,6 +63,16 @@ export class PublishStack extends Stack {
       autoDeleteObjects: ephemeral && !deploy.emulated,
     });
 
+    // Solo el catálogo vigente es legible desde CloudFront: las versiones `published/v<N>/` (historial
+    // para revertir) nunca se sirven. El bucket NO se hace público.
+    grantCdnRead({
+      stack: this,
+      bucket: this.bucket,
+      distributionId: siteDistributionId,
+      objectPatterns: ['published/catalog.json'],
+      emulated: deploy.emulated,
+      what: 'el catálogo publicado',
+    });
     new CfnOutput(this, 'PublishBucketName', { value: this.bucket.bucketName });
   }
 }
